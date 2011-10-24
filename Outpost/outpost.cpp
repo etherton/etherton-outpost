@@ -152,7 +152,7 @@ public:
     virtual amt_t purchaseFactories(const vector<uint8_t> &maxByType,productionEnum_t &whichFactory) = 0;
     virtual amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) = 0;
     virtual amt_t purchaseRobots(money_t perRobot,amt_t maxAllowed,amt_t maxUsable) = 0;
-    virtual void assignPersonnel() = 0;
+    virtual void assignPersonnel(vector<uint8_t> &factories,vector<uint8_t> &mannedByColonists,vector<uint8_t> &mannedByRobots,amt_t robotLimit) = 0;
 };
 
 class player_t {
@@ -173,10 +173,10 @@ public:
         robots = 0; // active robots limit is colonistLimit times number of robotics upgrades.
         productionLimit = 10;
 		productionSize = 0;
-        unmannedSlots = 0;
 		factories.resize(PRODUCTION_COUNT);
-		mannedByColonists.resize(PRODUCTION_COUNT);
-		mannedByRobots.resize(PRODUCTION_COUNT);
+        // the last element of these two arrays is used to hold personnnel not assigned to any factory
+		mannedByColonists.resize(PRODUCTION_COUNT+1);
+		mannedByRobots.resize(PRODUCTION_COUNT+1);
         upgrades.resize(UPGRADE_COUNT);
 		totalCredits = 0;
         totalUpgradeCosts = 0;
@@ -256,22 +256,18 @@ public:
             colonistLimit += 3;
         else if (upgrade == ROBOTICS)
             robots++;
-        else if (upgrade == LABORATORY) {
+        else if (upgrade == LABORATORY)
             factories[RESEARCH]++;
-            unmannedSlots++;
-        }
         else if (upgrade == OUTPOST) {
             colonistLimit += 5;
             productionLimit += 5;
             factories[TITANIUM]++;
-            unmannedSlots++;
         }
         // the last three upgrades are all special factories that must be manned
         // but also can be manned regardless of the population limit.
         else if (upgrade >= SPACE_STATION) {
             factories[upgrade - SPACE_STATION + ORBITAL_MEDICINE]++;
             extraColonistLimit++;
-            unmannedSlots++;
         }
     }
     
@@ -354,6 +350,7 @@ public:
                 limit = totalCredits / price;
             amt_t purchased = brain->purchaseColonists(price,limit);
             colonists += purchased;
+            mannedByColonists[PRODUCTION_COUNT] += purchased;
             payFor(purchased * price,bank,0);
         }
         // you must have ROBOTICS in order to buy any.  there is no limit to how many you can buy,
@@ -363,9 +360,10 @@ public:
             amt_t limit = totalCredits / price;
             amt_t purchased = brain->purchaseRobots(price,limit,(upgrades[ROBOTICS] * (colonistLimit + extraColonistLimit)) - robots);
             robots += purchased;
+            mannedByRobots[PRODUCTION_COUNT] += purchased;
             payFor(purchased * price,bank,0);
         }        
-        brain->assignPersonnel();
+        brain->assignPersonnel(factories,mannedByColonists,mannedByRobots,upgrades[ROBOTICS] * (colonistLimit + extraColonistLimit));
     }
     
     const string& getName() const { return brain->getName(); }
@@ -722,35 +720,40 @@ public:
         // buy as many robots as we can afford
         return 0;
     }
-    void assignPersonnel() {
+    void assignPersonnel(vector<uint8_t> &factories,vector<uint8_t> &mannedByColonists,vector<uint8_t> &mannedByRobots,amt_t robotLimit) {
     }
 };
+
+static unsigned readUnsigned() {
+    string answer;
+    getline(cin,answer);
+    return atoi(answer.c_str());
+}
+
+static char readLetter() {
+    string answer;
+    getline(cin,answer);
+    return toupper(answer[0]);
+}
 
 class playerBrain_t: public brain_t {
 public:
 	playerBrain_t(std::string name) : brain_t(name) { }
     bool wantMega(productionEnum_t t) {
         cout << name << ", do you want a megaproduction card for " << factoryNames[t] << "? ";
-        std::string answer;
-        getline(cin,answer);
-        return toupper(answer[0]) == 'Y';
+        return readLetter() == 'Y';
     }
     void displayProductionCards(vector<card_t> &hand) {
         for (cardIndex_t i=0; i<hand.size(); i++)
             cout << i << ". " << factoryNames[hand[i].prodType] << "/" << hand[i].value << "$" << endl;
     }
-    unsigned readIndex() {
-        string answer;
-        getline(cin,answer);
-        return atoi(answer.c_str());
-    }
-    cardIndex_t pickDiscard(vector<card_t> &hand) {
+   cardIndex_t pickDiscard(vector<card_t> &hand) {
         cout << name << ", you are over your hand limit.\n";
         displayProductionCards(hand);
         cardIndex_t which = 0;
         do {
             cout << name << ", which card to you want to discard? ";
-            which = readIndex();
+            which = readUnsigned();
         } while (which >= hand.size());
         return which;
     }
@@ -760,7 +763,7 @@ public:
         cout << upgradeMarket.size() << ". (no auction)\n";
        cout << name << ", pick a card to auction?\n";
         for(;;) {
-            cardIndex_t which = readIndex();
+            cardIndex_t which = readUnsigned();
             if (which > upgradeMarket.size())
                 continue;
             else if (which != upgradeMarket.size()) {
@@ -783,7 +786,7 @@ public:
             cout << name << ", the bid for " << upgradeNames[upgrade] << " is now at " << bid << ", enter a higher bid or 0 to pass: ";
         money_t newBid;
         for (;;) {
-            newBid = readIndex();
+            newBid = readUnsigned();
             if (newBid == 0)
                 return 0;
             else if (newBid <= bid)
@@ -808,7 +811,7 @@ public:
                 cout << name << ", you still need to discard " << minimumResearchCards << " more research cards!\n";
             displayProductionCards(hand);
             cout << "Enter a card, by number, to discard: ";
-            cardIndex_t which = readIndex();
+            cardIndex_t which = readUnsigned();
             if (which < hand.size()) {
                 cost -= hand[which].value;
                 if (hand[which].prodType == RESEARCH)
@@ -824,11 +827,11 @@ public:
             if (maxByType[i])
                 cout << i << ". " << factoryNames[i] << " (at most " << int(maxByType[i]) << ")" << endl;
         cout << "9. none\n";
-        whichFactory = (productionEnum_t) readIndex();
+        whichFactory = (productionEnum_t) readUnsigned();
         if (whichFactory > NEW_CHEMICALS || !maxByType[whichFactory])
             return 0;
         cout << "How many factories would you like to buy?  (at most " << int(maxByType[whichFactory]) << ") ";
-        amt_t numToBuy = readIndex();
+        amt_t numToBuy = readUnsigned();
         if (numToBuy > maxByType[whichFactory])
             numToBuy = maxByType[whichFactory];
         return numToBuy;
@@ -836,7 +839,7 @@ public:
     amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) {
         for(;;) {
             cout << name << ", how many colonists do you want to buy at " << perColonist << " each? (at most " << maxAllowed << ") ";
-            amt_t amt = readIndex();
+            amt_t amt = readUnsigned();
             if (amt < maxAllowed)
                 return amt;
         }
@@ -844,14 +847,53 @@ public:
     amt_t purchaseRobots(money_t perRobot,amt_t maxAllowed,amt_t maxUsable) {
         for(;;) {
             cout << name << ", how many robots do you want to buy at " << perRobot << " each? (at most " << maxAllowed << ", of which " << maxUsable << " can currently be used) ";
-            amt_t amt = readIndex();
+            amt_t amt = readUnsigned();
             if (amt < maxAllowed)
                 return amt;
         }
     }
-    void assignPersonnel() {
+    void assignPersonnel(vector<uint8_t> &factories,vector<uint8_t> &mannedByColonists,vector<uint8_t> &mannedByRobots,amt_t robotLimit) {
+        for (;;) {
+            cout << name << ", here are your current allocations:\n";
+            amt_t robotsInUse = 0;
+            for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++) {
+                if (factories[i])
+                    cout << i << ". " << factoryNames[i] << ": " << int(mannedByColonists[i]) << " colonists, " << int(mannedByRobots[i]) << " robots.\n";
+                robotsInUse += mannedByRobots[i];
+            }
+            cout << PRODUCTION_COUNT << ". Unallocated: " << int(mannedByColonists[PRODUCTION_COUNT]) << " colonists, " << int(mannedByRobots[PRODUCTION_COUNT]) << " robots (max allocated is " << robotLimit << ").\n";
+            cout << "Transfer colonist (c), robot (r), or anything else to finish? ";
+            char cmd = readLetter();
+            if (cmd != 'C' && cmd != 'R')
+                return;
+            vector<uint8_t> &manned = (cmd == 'C')? mannedByColonists : mannedByRobots;
+            cout << "Transfer source? ";
+            productionEnum_t src = (productionEnum_t)readUnsigned();
+            if (src > PRODUCTION_COUNT || !manned[src]) {
+                cout << "Sorry, that is an invalid or empty transfer source.\n";
+                continue;
+            }
+            cout << "Number to transfer? ";
+            amt_t xferAmt = readUnsigned();
+            if (xferAmt > manned[src]) {
+                cout << "Sorry, only " << int(manned[src]) << " personnel at that location.\n";
+                continue;
+            }
+            cout << "Transfer destination? ";
+            productionEnum_t dst = (productionEnum_t)readUnsigned();
+            if (dst > PRODUCTION_COUNT || (dst != PRODUCTION_COUNT && factories[dst] < mannedByColonists[dst] + mannedByRobots[dst] + xferAmt)) {
+                cout << "Sorry, that is an invalid transfer destination or there isn't enough room there.\n";
+                continue;
+            }
+            else if (dst != PRODUCTION_COUNT && src == PRODUCTION_COUNT && cmd == 'R' && robotsInUse + xferAmt > robotLimit) {
+                cout << "Sorry, that would place you over your robot limit of " << robotLimit << ".\n";
+                continue;
+            }
+            // otherwise, perform the transfer
+            manned[src] -= xferAmt;
+            manned[dst] += xferAmt;
+        }
     }
-
 };
 
 
@@ -864,9 +906,7 @@ int main() {
     
 	for (;;) {
 		cout << "Number of players?  (2-9) ";
-        std::string answer;
-        getline(cin,answer);
-        playerCount = atoi(answer.c_str());
+        playerCount = readUnsigned();
         if (playerCount < 2 || playerCount > 9)
             seed = playerCount;
         else
