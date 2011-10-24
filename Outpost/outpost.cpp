@@ -44,10 +44,15 @@ inline int d12() { return rand() % 12; }
 
 
 struct card_t {
-	uint8_t value, 		// biggest card in game is 88, so 7 bits would be enough.
-		prodType:4, 	// productionEnum_t
-		handSize:3;	// 0 for Research and Microbiotics.  4 for mega water, titanium, or new chem.  1 otherwise.
+	uint8_t value,          // biggest card in game is 88, so 7 bits would be enough.
+		prodType:4,         // productionEnum_t
+		handSize:3,         // 0 for Research and Microbiotics.  4 for mega water, titanium, or new chem.  1 otherwise.
+        returnToDiscard:1;  // 1 if it goes to discard pile, 0 if "proxy" card or mega
 };
+
+typedef size_t cardIndex_t;
+typedef size_t playerIndex_t;
+typedef int money_t;
 
 struct cardDistribution_t {
 	uint8_t value, count;
@@ -98,11 +103,14 @@ public:
 		// if the discard pile was empty too, synthesize a fake card having the average value.
 		// note in the real game you'd track this on paper and it would disappear when spent.
 		// in this version, the fake card will make it back into the (now larger) production deck.
-		if (deck.size() == 0)
+		if (deck.size() == 0) {
 			newCard.value = average;
+            newCard.returnToDiscard = false;
+        }
 		else {
 			// otherwise take the top of the draw deck and consume it, return it to caller
 			newCard.value = deck.back();
+            newCard.returnToDiscard = true;
 			deck.pop_back();
 		}
 		return newCard;
@@ -123,24 +131,30 @@ public:
 
 typedef vector<productionDeck_t> decks_t;
 
+class player_t;
+
 class brain_t {
 protected:
 	string name;
+    player_t *player;
 public:
 	brain_t(string n) : name(n) { }
 	virtual ~brain_t() { }
     const string& getName() const { return name; }
+    void setPlayer(player_t &p) { player = &p; }
 
 	virtual bool wantMega(productionEnum_t) = 0;
-    virtual int pickDiscard(vector<card_t> &productionCards) = 0;
+    virtual cardIndex_t pickDiscard(vector<card_t> &productionCards) = 0;
+    virtual cardIndex_t pickCardToAuction(vector<upgradeEnum_t> &upgradeMarket,money_t &bid) = 0;
+    virtual money_t raiseOrPass(upgradeEnum_t upgrade,money_t bid) = 0;
+    virtual void payFor(money_t cost,decks_t &decks,productionEnum_t withAtLeastOne = PRODUCTION_COUNT) = 0;
 };
 
 class player_t {
 	vector<card_t> productionCards;
 	typedef vector<card_t>::iterator cardIt_t;
 	uint8_t colonists, colonistLimit, robots, productionSize, productionLimit;
-	uint16_t totalCredits, totalUpgradeCosts;
-    uint32_t scaledVictoryPoints;   // victory points times a thousand, plus printed cost of purchased upgrades.
+	money_t totalCredits, totalUpgradeCosts;
 	vector<uint8_t> factories;
 	vector<uint8_t> mannedByColonists;
 	vector<uint8_t> mannedByRobots;
@@ -187,13 +201,13 @@ public:
 		totalCredits += newCard.value;
 	}
     
-    void discardCard(decks_t &decks,int which) {
+    void discardCard(decks_t &decks,cardIndex_t which) {
         card_t discard = productionCards[which];
         // erase the card from hand
         productionCards.erase(productionCards.begin() + which);
         productionSize -= discard.handSize;
         totalCredits -= discard.value;
-        if (discard.handSize != 4)  // mega cards don't go into same deck
+        if (discard.returnToDiscard)  // mega cards don't go into same deck
             decks[discard.prodType].discardCard(discard.value);
     }
 
@@ -206,7 +220,7 @@ public:
             else if (i==MICROBIOTICS)
                 toDraw += upgrades[ORBIAL_LAB];
 			while (toDraw >= 4 && decks[i].getMegaValue() && brain->wantMega(i)) {
-				card_t megaCard = { decks[i].getMegaValue(), i, 4 };
+				card_t megaCard = { decks[i].getMegaValue(), i, 4, false };
 				addCard(megaCard);
 				toDraw -= 4;
 			}
@@ -223,7 +237,7 @@ public:
         }
     }
     
-    void addUpgrade(uint8_t upgrade) {
+    void addUpgrade(upgradeEnum_t upgrade) {
         upgrades[upgrade]++;
         // this is used for breaking ties on victory points
         totalUpgradeCosts += upgradeCosts[upgrade];
@@ -261,11 +275,34 @@ public:
         return (vps << 20) + (totalUpgradeCosts<<8);
     }
     
+    
+    void purchaseFactories(bool firstTurn) {
+        
+    }
+    
+    void purchaseAndAssignPersonnel() {
+    }
+    
     const string& getName() const { return brain->getName(); }
-
+    
+    brain_t& getBrain() const { return *brain; }
+    
+    money_t computeDiscount(upgradeEnum_t upgrade) const {
+        if (upgrade == SCIENTISTS || upgrade == LABORATORY)
+            return upgrades[DATA_LIBRARY] * 10;
+        else if (upgrade == WAREHOUSE || upgrade == NODULE)
+            return upgrades[HEAVY_EQUIPMENT] * 5;
+        else if (upgrade == OUTPOST)
+            return upgrades[HEAVY_EQUIPMENT] * 15 + upgrades[ECOPLANTS] * 10;
+        else
+            return 0;
+    }
+    
+    money_t getTotalCredits() const { return totalCredits; }
+    
 	void dump() {
 		cout << "player " << brain->getName() << ", " << int(colonists) << "/" << int(colonistLimit) << " colonists, " << int(productionSize) << "/" << int(productionLimit) << " cards\n\tfactories: ";
-		for (int i=0; i<PRODUCTION_COUNT; i++)
+		for (int i=ORE; i<PRODUCTION_COUNT; i++)
 			if (factories[i])
 				cout << factoryNames[i] << ":" << int(factories[i]) << "(" << int(mannedByColonists[i]) << 
 					"/" << int(mannedByRobots[i]) << ") ";
@@ -280,14 +317,14 @@ public:
 class game_t {
 	vector<productionDeck_t> productionDecks;
 	vector<uint8_t> upgradeDrawPiles;
-	vector<uint8_t> upgradeMarket;
+	vector<upgradeEnum_t> upgradeMarket;
 	vector<uint8_t> currentMarketCounts;
 	vector<player_t> players;
 	typedef vector<player_t>::iterator playerIt_t;
 	vector<uint8_t> playerOrder;
 	typedef vector<uint8_t>::iterator playerOrderIt_t;
 	uint8_t era, marketLimit;
-	uint16_t highestVp;
+    uint8_t highestVp;
 	bool previousMarketEmpty;
 public:
 	void setupProductionDecks() {
@@ -314,12 +351,13 @@ public:
 		productionDecks[MOON_ORE].init(MOON_ORE,MoonOreDeck,NELEM(MoonOreDeck),50,0,true);
 	}
 
-	void setupUpgradeDecks(int playerCount) {
+	void setupUpgradeDecks(playerIndex_t playerCount) {
 		upgradeDrawPiles.clear();
 		upgradeDrawPiles.reserve(PRODUCTION_COUNT);
 		if (playerCount == 2) {
-			int even = 0, odd = 0, i;
-			for (i=0; i<UPGRADE_COUNT; i++) {
+			int even = 0, odd = 0;
+            upgradeEnum_t i;
+			for (i=DATA_LIBRARY; i<UPGRADE_COUNT; i++) {
 				if (rand() & 1) {
 					upgradeDrawPiles.push_back(1);
 					if (++odd == 10)
@@ -339,14 +377,14 @@ public:
 		else {
 			static const uint8_t upgrades_1_10[10] = { 0,0,0, 2,3,3,4,5,5,6 };
 			static const uint8_t upgrades_11_13[10] = { 0,0,0, 2,3,4,4,5,6,6 };
-			for (int i=0; i<10; i++)
+			for (upgradeEnum_t i=DATA_LIBRARY; i<SPACE_STATION; i++)
 				upgradeDrawPiles.push_back(upgrades_1_10[playerCount]);
-			for (int i=10; i<UPGRADE_COUNT; i++)
+			for (upgradeEnum_t i=SPACE_STATION; i<UPGRADE_COUNT; i++)
 				upgradeDrawPiles.push_back(upgrades_11_13[playerCount]);
 		}
 	}
 
-	void chooseInitialUpgrades(int playerCount) {
+	void chooseInitialUpgrades(playerIndex_t playerCount) {
 		upgradeMarket.clear();
 		currentMarketCounts.clear();
 		currentMarketCounts.resize(UPGRADE_COUNT);
@@ -354,15 +392,18 @@ public:
         replaceUpgradeCards();
 	}
 
-	void setInitialPlayerState(int playerCount) {
+	void setInitialPlayerState(playerIndex_t playerCount) {
 		players.clear();
+        // default ctor sets up a bunch of game state
 		players.resize(playerCount);
+        // do initial production draws for each player
 		for (playerIt_t i=players.begin(); i!= players.end(); i++) {
             // production is doubled on first turn.
             i->drawProductionCards(productionDecks);
             i->drawProductionCards(productionDecks);
         }
         
+        // randomly assign player order on first turn
 		playerOrder.clear();
 		playerOrder.resize(playerCount);
 		for (int i=0; i<playerOrder.size(); i++)
@@ -371,9 +412,9 @@ public:
 	}
 
 
-	void setupGame(int playerCount) {
+	void setupGame(playerIndex_t playerCount) {
 		era = 1;
-		highestVp = 3;
+        highestVp = 3;
 		previousMarketEmpty = false;
 		setupProductionDecks();
 		setupUpgradeDecks(playerCount);
@@ -381,8 +422,9 @@ public:
 		setInitialPlayerState(playerCount);
 	}
 
-	void setPlayerBrain(int index,brain_t &brain) {
+	void setPlayerBrain(playerIndex_t index,brain_t &brain) {
 		players[index].setBrain(brain);
+        brain.setPlayer(players[index]);
         players[index].dump();
 	}
     
@@ -392,8 +434,8 @@ public:
 		// beyond that, ties are broken randomly by assigning some random bits to the LSB's
         // and finally beyond that, ties are broken by ordinal value
         vector<unsigned> playerVps;
-        for (unsigned i=0; i<players.size(); i++)
-            playerVps.push_back(players[i].computeScaledVictoryPoints() | (rand() & 0xF0) | i);
+        for (playerIndex_t i=0; i<players.size(); i++)
+            playerVps.push_back(players[i].computeScaledVictoryPoints() | (rand() & 0xF0) | uint8_t(i));
         // sort in ascending order (default uses operator<)
         sort(playerVps.begin(),playerVps.end());
         playerOrder.clear();
@@ -405,14 +447,14 @@ public:
 	}
     
     void displayPlayerOrder() {
-        for (unsigned i=0; i<playerOrder.size(); i++)
-            cout << players[playerOrder[i]].getName() << " is Player " << i+1 << " this round.\n";
+        for (playerIndex_t i=0; i<playerOrder.size(); i++)
+            cout << players[playerOrder[i]].getName() << " is Player " << i+1 << " this round (" << (players[playerOrder[i]].computeScaledVictoryPoints() >> 20) << " VPs).\n";
     }
 
 	void replaceUpgradeCards() {
 		// figure out whether the market is totally empty or not
 		bool marketEmpty = upgradeMarket.size() == 0;
-		for (int i=0; i<(era==1?4:10) && marketEmpty; i++)
+		for (upgradeEnum_t i=DATA_LIBRARY; i<(era==1?SCIENTISTS:SPACE_STATION) && marketEmpty; i++)
 			if (upgradeDrawPiles[i])
 				marketEmpty = false;
 		static const uint8_t minVpsForEra3[] = { 0,0,40,35,40,30,35,40,30,35 };
@@ -426,11 +468,11 @@ public:
         
         while (upgradeMarket.size() < players.size()) {
             // First check if any roll has a chance to succeeed
-            int firstMarket = era==3? 1 : 0;
-            int marketSize = era==3?12 : era==2? 10 : 4;
+            upgradeEnum_t firstMarket = era==3? WAREHOUSE : DATA_LIBRARY;
+            int marketSize = era==3? 12 : era==2? 10 : 4;
             bool anyValid = false;
             // note that we start at zero because even in Era 3 an unpurchased Data Library could still come up for auction.
-            for (int i=0; !anyValid && i<firstMarket+marketSize; i++)
+            for (upgradeEnum_t i=DATA_LIBRARY; !anyValid && i<firstMarket+marketSize; i++)
                 // if there is a card left of this type and we 
                 if (upgradeDrawPiles[i] && currentMarketCounts[i] != marketLimit)
                     anyValid = true;
@@ -438,14 +480,14 @@ public:
             if (!anyValid)
                 break;
             
-            int roll = firstMarket + (rand() % marketSize);
+            upgradeEnum_t roll = static_cast<upgradeEnum_t>(firstMarket + (rand() % marketSize));
             for(;;) {
                 if (upgradeDrawPiles[roll] && currentMarketCounts[roll] != marketLimit)
                     break;
                 else if (roll) // try next upgrade downward
                     --roll;
                 else    // pick a new roll if we hit the bottom of the list
-                    roll = firstMarket + (rand() % marketSize);
+                    roll = static_cast<upgradeEnum_t>(firstMarket + (rand() % marketSize));
             }
             
             upgradeDrawPiles[roll]--;
@@ -466,14 +508,62 @@ public:
 		}
 	}
 
+    void auctionUpgradeCards(playerIndex_t selfIndex) {
+        cardIndex_t nextAuction;
+        money_t bid;
+        while (upgradeMarket.size() && (nextAuction = players[selfIndex].getBrain().pickCardToAuction(upgradeMarket,bid)) != upgradeMarket.size()) {
+            // remove the card from the market
+            upgradeEnum_t upgrade = upgradeMarket[nextAuction];
+            upgradeMarket.erase(upgradeMarket.begin() + nextAuction);
+            currentMarketCounts[upgrade]--;
+            cout << players[selfIndex].getName() << " places a " << upgradeNames[upgrade] << " up for auction with an opening bid of " << bid << ".\n";
+            
+            // run the auction until everybody else passes.
+            unsigned numPassedInARow = 0;
+            playerIndex_t highBidder = selfIndex;
+            playerIndex_t nextBidder = selfIndex;
+            for (;;) {
+                if (++nextBidder == players.size())
+                    nextBidder = 0;
+                int newBid = players[nextBidder].getBrain().raiseOrPass(upgrade,bid);
+                // somebody wants to bid?
+                if (newBid) {
+                    highBidder = nextBidder;
+                    bid = newBid;
+                    numPassedInARow = 0;
+                    cout << players[highBidder].getName() << " raises the bid to " << bid << ".\n";
+                }
+                // everybody else has passed?
+                else if (++numPassedInARow == players.size())
+                    break;
+                else
+                    cout << players[nextBidder].getName() << " passes.\n";
+            }
+            
+            cout << players[highBidder].getName() << " wins the auction for a " << upgradeNames[upgrade] << " with " << bid << " credits.\n";
+            money_t discount = players[highBidder].computeDiscount(upgrade);
+            if (bid > discount)
+                players[highBidder].getBrain().payFor(bid - discount,productionDecks);
+            players[highBidder].addUpgrade(upgrade);
+        }
+    }
+
 	void performPlayerTurns(bool firstTurn) {
+		for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
+            auctionUpgradeCards(*i);
+            players[*i].purchaseFactories(firstTurn);
+            players[*i].purchaseAndAssignPersonnel();
+        }        
 	}
 
 	bool checkVictoryConditions() {
-        unsigned winnerIndex = 0;
+        playerIndex_t winnerIndex = 0;
         unsigned winnerScore = 0;
-        for (unsigned i=0; i<players.size(); i++) {
+        highestVp = 0;
+        for (playerIndex_t i=0; i<players.size(); i++) {
             unsigned vps = players[i].computeScaledVictoryPoints();
+            if ((vps >> 20) > highestVp)
+                highestVp = (vps >> 20);    // for tracking market replenishment era
             if (vps >= (75 << 20)) {
                 if (vps > winnerScore) {
                     winnerIndex = i;
@@ -485,17 +575,14 @@ public:
             return false;   // nobody reached 75 points yet
         cout << "With a winning score of " << (winnerScore >> 20) << " and " << ((winnerScore >> 8) & 0xFFF) << " tiebreaking points:\n";
         // there may be multiple tying players.
-        for (unsigned i=0; i<players.size(); i++) {
+        for (playerIndex_t i=0; i<players.size(); i++) {
             if (players[i].computeScaledVictoryPoints() == winnerScore)
                 cout << players[i].getName() << " wins!\n";
         }        
         return true;
 	}
-    
-    uint8_t getNumberOfUpgradesInMarket(upgradeEnum_t e) const {
-        return currentMarketCounts[e];
-    }
 };
+
 
 class computerBrain_t: public brain_t {
 	const game_t &game;
@@ -507,18 +594,18 @@ public:
 		// hand limit and have to discard.
 		return false; 
 	}
-    int cardAdjustedValue(card_t &card) {
-        int value = card.value;
+    money_t cardAdjustedValue(card_t &card) {
+        money_t value = card.value;
         if (card.prodType == RESEARCH)
             value += 5; // a guess... should also see if we have any chance of affording a New Chem factory, and whether we even want one.
         return value;
     }
-    int pickDiscard(vector<card_t> &productionCards) {
+    cardIndex_t pickDiscard(vector<card_t> &productionCards) {
         // Just pick the cheapest card we have.
-        int guessValue = cardAdjustedValue(productionCards[0]);
-        int guessIndex = 0;
-        for (int i=1; i<productionCards.size(); i++) {
-            int thisValue = cardAdjustedValue(productionCards[i]);
+        money_t guessValue = cardAdjustedValue(productionCards[0]);
+        cardIndex_t guessIndex = 0;
+        for (cardIndex_t i=1; i<productionCards.size(); i++) {
+            money_t thisValue = cardAdjustedValue(productionCards[i]);
             if (thisValue < guessValue) {
                 guessValue = thisValue;
                 guessIndex = i;
@@ -526,7 +613,15 @@ public:
         }
         return guessIndex;
     }
-
+    cardIndex_t pickCardToAuction(vector<upgradeEnum_t> &upgradeMarket,int &bid) {
+        // for now - never initiates an auction
+        return upgradeMarket.size();
+    }
+    money_t raiseOrPass(upgradeEnum_t upgrade,money_t bid) {
+        return 0;   // never bids
+    }
+    void payFor(money_t cost,decks_t &decks,productionEnum_t withAtLeastOne) {
+    }
 };
 
 class playerBrain_t: public brain_t {
@@ -538,21 +633,66 @@ public:
         getline(cin,answer);
         return toupper(answer[0]) == 'Y';
     }
-    int pickDiscard(vector<card_t> &productionCards) {
+    cardIndex_t pickDiscard(vector<card_t> &productionCards) {
         cout << name << ", you are over your hand limit.\n";
-        for (int i=0; i<productionCards.size(); i++)
+        for (cardIndex_t i=0; i<productionCards.size(); i++)
             cout << i << ". " << factoryNames[productionCards[i].prodType] << "/" << productionCards[i].value << "$" << endl;
         
-        int which = 0;
+        cardIndex_t which = 0;
         do {
             cout << name << ", which card to you want to discard? ";
             std::string answer;
             getline(cin,answer);
             which = atoi(answer.c_str());
-        } while (which < 0 || which >= productionCards.size());
+        } while (which >= productionCards.size());
         return which;
     }
-                    
+    cardIndex_t pickCardToAuction(vector<upgradeEnum_t> &upgradeMarket,money_t &bid) {
+        for (cardIndex_t i=0; i<upgradeMarket.size(); i++)
+            cout << i << ". " << upgradeNames[upgradeMarket[i]] << "(min bid is " << upgradeCosts[upgradeMarket[i]] << ")\n";
+        cout << upgradeMarket.size() << ". (no auction)\n";
+       cout << name << ", pick a card to auction?\n";
+        for(;;) {
+            string answer;
+            getline(cin,answer);
+            cardIndex_t which = atoi(answer.c_str());
+            if (which > upgradeMarket.size())
+                continue;
+            else if (which != upgradeMarket.size()) {
+                bid = raiseOrPass(upgradeMarket[which],upgradeCosts[upgradeMarket[which]]-1);
+                if (!bid)       // couldn't make valid opening bid
+                    continue;
+            }
+            else
+                return which;
+        }
+    }
+    money_t raiseOrPass(upgradeEnum_t upgrade,money_t bid) {
+        money_t discount = player->computeDiscount(upgrade);
+        // don't bother asking if we cannot afford it
+        if (bid - discount > player->getTotalCredits())
+            return 0;
+        else if (bid == upgradeCosts[upgrade] - 1)
+            cout << name << ", please pick an opening bid for " << upgradeNames[upgrade] << " of at least " << bid+1 << " or 0 to pass: ";
+        else
+            cout << name << ", the bid for " << upgradeNames[upgrade] << " is now at " << bid << ", enter a higher bid or 0 to pass: ";
+        money_t newBid;
+        for (;;) {
+            string answer;
+            getline(cin,answer);
+            newBid = atoi(answer.c_str());
+            if (newBid == 0)
+                return 0;
+            else if (newBid <= bid)
+                cout << "The bid must either be 0 to pass or something at least " << bid+1 << ".\n";
+            else if (bid < player->getTotalCredits() - discount)
+                cout << "You only have " << player->getTotalCredits() << " (with a discount of " << discount << ") and cannot afford that bid.\n";
+            else
+                return newBid;
+        }
+    }
+    void payFor(money_t cost,decks_t &decks,productionEnum_t withAtLeastOne) {
+    }
 };
 
 
@@ -594,6 +734,7 @@ int main() {
   
     // attach brains to each player
     cout << "If you enter an empty string for a name, that and all future players will be run by computer.\n";
+    cout << "Players should be entered in seating order (aka auction bidding order).\n";
 	bool anyHumans = true;
     for (int i=0; i<playerCount; i++) {
 		string name;
@@ -615,7 +756,7 @@ int main() {
   		game.setPlayerBrain(i,*thisBrain);
 	}
 
-    // do the first turn of the game (several phases are skipped, victory is impossible)
+    // do the first turn of the game (several phases are skipped, victory is impossible and so is an era change
     game.displayPlayerOrder();
 	game.performPlayerTurns(true);
     
