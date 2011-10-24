@@ -221,7 +221,7 @@ public:
             bank[discard.prodType].discardCard(discard.value);
     }
 
-	void drawProductionCards(bank_t &bank) {
+	void drawProductionCards(bank_t &bank,bool firstTurn) {
 		for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++) {
 			int toDraw = mannedByColonists[i] + mannedByRobots[i];
             // special case: each scientist upgrade produces a research card without being populated.
@@ -229,11 +229,15 @@ public:
                 toDraw += upgrades[SCIENTISTS];
             else if (i==MICROBIOTICS)
                 toDraw += upgrades[ORBITAL_LAB];
+            toDraw <<= firstTurn;   // double production on first turn
 			while (toDraw >= 4 && bank[i].getMegaValue() && brain->wantMega(i)) {
 				card_t megaCard = { bank[i].getMegaValue(), i, 4, false };
 				addCard(megaCard);
 				toDraw -= 4;
+                cout << getName() << " draws a " << factoryNames[i] << " mega production card.\n";
 			}
+            if (toDraw)
+                cout << getName() << " draws " << toDraw << " " << factoryNames[i] << " production cards.\n";
             while (toDraw) {
                 addCard(bank[i]);
                 --toDraw;
@@ -286,12 +290,14 @@ public:
         // compute victory points for static upgrades
         for (upgradeEnum_t i=DATA_LIBRARY; i<UPGRADE_COUNT; i++) {
             static const uint8_t vpsForUpgrade[UPGRADE_COUNT] = { 1,1,1,2,2, 3,3,5,5,5, 0,0,0 };
-            vps += vpsForUpgrade[i] * (mannedByColonists[i] + mannedByRobots[i]);
+            unsigned scored = vpsForUpgrade[i] * upgrades[i];
+            vps += scored;
         }
         // now include victory points for factories which are manned
         for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++) {
             static const uint8_t vpsForMannedFactory[UPGRADE_COUNT] = { 1,1,2,2,0, 0,3,10,15,20 };
-            vps += vpsForMannedFactory[i] * (mannedByColonists[i] + mannedByRobots[i]);
+            unsigned scored = vpsForMannedFactory[i] * (mannedByColonists[i] + mannedByRobots[i]);
+            vps += scored;
         }
         // leave room in the 4 lsb's to store the player index
         // and room in the next 4 lsb's for some random noise for tiebreaking
@@ -366,20 +372,24 @@ public:
             amt_t limit = colonistLimit + extraColonistLimit - colonists;
             if (limit > totalCredits / price)
                 limit = totalCredits / price;
-            amt_t purchased = brain->purchaseColonists(price,limit);
-            colonists += purchased;
-            mannedByColonists[PRODUCTION_COUNT] += purchased;
-            payFor(purchased * price,bank,0);
+            amt_t purchased = limit? brain->purchaseColonists(price,limit) : 0;
+            if (purchased) {
+                colonists += purchased;
+                mannedByColonists[PRODUCTION_COUNT] += purchased;
+                payFor(purchased * price,bank,0);
+            }
         }
         // you must have ROBOTICS in order to buy any.  there is no limit to how many you can buy,
         // but you can only operate one per colonist per ROBOTICS upgrade owned.
         if (upgrades[ROBOTICS]) {
             money_t price = 10;
             amt_t limit = totalCredits / price;
-            amt_t purchased = brain->purchaseRobots(price,limit,(upgrades[ROBOTICS] * (colonistLimit + extraColonistLimit)) - robots);
-            robots += purchased;
-            mannedByRobots[PRODUCTION_COUNT] += purchased;
-            payFor(purchased * price,bank,0);
+            amt_t purchased = limit? brain->purchaseRobots(price,limit,(upgrades[ROBOTICS] * (colonistLimit + extraColonistLimit)) - robots) : 0;
+            if (purchased) {
+                robots += purchased;
+                mannedByRobots[PRODUCTION_COUNT] += purchased;
+                payFor(purchased * price,bank,0);
+            }
         }        
         brain->assignPersonnel(factories,mannedByColonists,mannedByRobots,upgrades[ROBOTICS] * (colonistLimit + extraColonistLimit));
     }
@@ -426,6 +436,19 @@ class game_t {
     uint8_t highestVp;
 	bool previousMarketEmpty;
 public:
+    game_t(playerIndex_t playerCount) {
+        // default ctor sets up a bunch of game state
+		players.resize(playerCount);
+
+		era = 1;
+        highestVp = 3;
+		previousMarketEmpty = false;
+		upgradeMarket.clear();
+		currentMarketCounts.clear();
+		currentMarketCounts.resize(UPGRADE_COUNT);
+        marketLimit = playerCount >> 1;
+    }
+    
 	void setupProductionDecks() {
 		static const cardDistribution_t OreDeck[] = { {1,4}, {2,6}, {3,6}, {4,6}, {5,4} };
 		static const cardDistribution_t WaterDeck[] = { {4,2}, {5,5}, {6,7}, {7,9}, {8,7}, {9,5}, {10,3} };
@@ -484,15 +507,10 @@ public:
 	}
 
 	void setInitialPlayerState(playerIndex_t playerCount) {
-		players.clear();
-        // default ctor sets up a bunch of game state
-		players.resize(playerCount);
         // do initial production draws for each player
-		for (playerIt_t i=players.begin(); i!= players.end(); i++) {
+		for (playerIt_t i=players.begin(); i!= players.end(); i++)
             // production is doubled on first turn.
-            i->drawProductionCards(bank);
-            i->drawProductionCards(bank);
-        }
+            i->drawProductionCards(bank,true);
         
         // randomly assign player order on first turn
 		playerOrder.clear();
@@ -503,17 +521,10 @@ public:
 	}
 
 
-	void setupGame(playerIndex_t playerCount) {
-		era = 1;
-        highestVp = 3;
-		previousMarketEmpty = false;
+	void setupGame() {
 		setupProductionDecks();
-		setupUpgradeDecks(playerCount);
-		upgradeMarket.clear();
-		currentMarketCounts.clear();
-		currentMarketCounts.resize(UPGRADE_COUNT);
-        marketLimit = playerCount >> 1;
-		setInitialPlayerState(playerCount);
+		setupUpgradeDecks(players.size());
+		setInitialPlayerState(players.size());
         replaceUpgradeCards();
 	}
 
@@ -585,6 +596,7 @@ public:
                     roll = static_cast<upgradeEnum_t>(firstMarket + (rand() % marketSize));
             }
             
+            cout << upgradeNames[roll] << " added to market.\n";
             upgradeDrawPiles[roll]--;
             currentMarketCounts[roll]++;
             upgradeMarket.push_back(roll);
@@ -593,7 +605,7 @@ public:
 
 	void drawProductionCards() {
 		for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
-			players[*i].drawProductionCards(bank);
+			players[*i].drawProductionCards(bank,false);
 		}
 	}
 
@@ -607,7 +619,7 @@ public:
         cardIndex_t nextAuction;
         money_t bid;
         cout << "There are " << upgradeMarket.size() << " cards available for auction.\n";
-        while (upgradeMarket.size() && (nextAuction = players[selfIndex].pickCardToAuction(upgradeMarket,bid) != upgradeMarket.size())) {
+        while (upgradeMarket.size() && (nextAuction = players[selfIndex].pickCardToAuction(upgradeMarket,bid)) != upgradeMarket.size()) {
             // remove the card from the market
             upgradeEnum_t upgrade = upgradeMarket[nextAuction];
             upgradeMarket.erase(upgradeMarket.begin() + nextAuction);
@@ -931,7 +943,6 @@ public:
 
 
 int main() {
-	game_t game;
 	unsigned playerCount;
 
     // seed the RNG, but let it be overridden from user input
@@ -948,10 +959,9 @@ int main() {
 
     cout << "(using " << seed << " as RNG seed)" << endl;
     srand(seed);
-    
-    // set up the play area, deal hands, etc
-	game.setupGame(playerCount);
 
+    game_t game(playerCount);
+    
     vector<string> computerNames;
     computerNames.push_back("*Alan T.");
     computerNames.push_back("*Steve J.");
@@ -988,6 +998,8 @@ int main() {
   		game.setPlayerBrain(i,*thisBrain);
 	}
 
+    // set up the play area, deal hands, etc
+	game.setupGame();
     // do the first turn of the game (several phases are skipped, victory is impossible and so is an era change
     game.displayPlayerOrder();
 	game.performPlayerTurns(true);
