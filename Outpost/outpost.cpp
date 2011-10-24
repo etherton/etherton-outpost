@@ -18,8 +18,8 @@ enum upgradeEnum_t {
 	HEAVY_EQUIPMENT, 
 	NODULE, 	// Era 1
 	SCIENTISTS, 
-	ORBIAL_LAB, 
-	ROBOTS, 
+	ORBITAL_LAB, 
+	ROBOTICS, 
 	LABORATORY, 
 	ECOPLANTS, 
 	OUTPOST, 	// Era 2
@@ -29,7 +29,7 @@ enum upgradeEnum_t {
 	UPGRADE_COUNT
 };
 
-const char *upgradeNames[UPGRADE_COUNT] = { "DataLibrary", "Warehouse", "HeavyEquipment", "Nodule", "Scientists", "OrbitalLab", "Robots",
+const char *upgradeNames[UPGRADE_COUNT] = { "DataLibrary", "Warehouse", "HeavyEquipment", "Nodule", "Scientists", "OrbitalLab", "Robotics",
 	"Laboratory", "Ecoplants", "Outpost", "SpaceStation", "PlanetaryCruiser", "MoonBase" };
 
 
@@ -52,6 +52,7 @@ struct card_t {
 
 typedef size_t cardIndex_t;
 typedef size_t playerIndex_t;
+typedef unsigned amt_t;
 typedef int money_t;
 
 struct cardDistribution_t {
@@ -129,7 +130,7 @@ public:
 	}
 };
 
-typedef vector<productionDeck_t> decks_t;
+typedef vector<productionDeck_t> bank_t;
 
 class player_t;
 
@@ -144,16 +145,20 @@ public:
     void setPlayer(player_t &p) { player = &p; }
 
 	virtual bool wantMega(productionEnum_t) = 0;
-    virtual cardIndex_t pickDiscard(vector<card_t> &productionCards) = 0;
+    virtual cardIndex_t pickDiscard(vector<card_t> &hand) = 0;
     virtual cardIndex_t pickCardToAuction(vector<upgradeEnum_t> &upgradeMarket,money_t &bid) = 0;
     virtual money_t raiseOrPass(upgradeEnum_t upgrade,money_t bid) = 0;
-    virtual void payFor(money_t cost,decks_t &decks,productionEnum_t withAtLeastOne = PRODUCTION_COUNT) = 0;
+    virtual money_t payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minimumResearchCards) = 0; // returns actual amount paid which may be higher
+    virtual amt_t purchaseFactories(const vector<uint8_t> &maxByType,productionEnum_t &whichFactory) = 0;
+    virtual amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) = 0;
+    virtual amt_t purchaseRobots(money_t perRobot,amt_t maxAllowed,amt_t maxUsable) = 0;
+    virtual void assignPersonnel() = 0;
 };
 
 class player_t {
-	vector<card_t> productionCards;
+	vector<card_t> hand;
 	typedef vector<card_t>::iterator cardIt_t;
-	uint8_t colonists, colonistLimit, robots, productionSize, productionLimit;
+	uint8_t colonists, colonistLimit, extraColonistLimit, robots, productionSize, productionLimit, unmannedSlots;
 	money_t totalCredits, totalUpgradeCosts;
 	vector<uint8_t> factories;
 	vector<uint8_t> mannedByColonists;
@@ -164,9 +169,11 @@ public:
 	player_t() {
 		colonists = 3;
 		colonistLimit = 5;
+        extraColonistLimit = 0;
         robots = 0; // active robots limit is colonistLimit times number of robotics upgrades.
         productionLimit = 10;
 		productionSize = 0;
+        unmannedSlots = 0;
 		factories.resize(PRODUCTION_COUNT);
 		mannedByColonists.resize(PRODUCTION_COUNT);
 		mannedByRobots.resize(PRODUCTION_COUNT);
@@ -196,44 +203,44 @@ public:
 	}
 
 	void addCard(card_t newCard) {
-		productionCards.push_back(newCard);
+		hand.push_back(newCard);
 		productionSize += newCard.handSize;
 		totalCredits += newCard.value;
 	}
     
-    void discardCard(decks_t &decks,cardIndex_t which) {
-        card_t discard = productionCards[which];
+    void discardCard(bank_t &bank,cardIndex_t which) {
+        card_t discard = hand[which];
         // erase the card from hand
-        productionCards.erase(productionCards.begin() + which);
+        hand.erase(hand.begin() + which);
         productionSize -= discard.handSize;
         totalCredits -= discard.value;
         if (discard.returnToDiscard)  // mega cards don't go into same deck
-            decks[discard.prodType].discardCard(discard.value);
+            bank[discard.prodType].discardCard(discard.value);
     }
 
-	void drawProductionCards(decks_t &decks) {
+	void drawProductionCards(bank_t &bank) {
 		for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++) {
 			int toDraw = mannedByColonists[i] + mannedByRobots[i];
             // special case: each scientist upgrade produces a research card without being populated.
             if (i==RESEARCH)
                 toDraw += upgrades[SCIENTISTS];
             else if (i==MICROBIOTICS)
-                toDraw += upgrades[ORBIAL_LAB];
-			while (toDraw >= 4 && decks[i].getMegaValue() && brain->wantMega(i)) {
-				card_t megaCard = { decks[i].getMegaValue(), i, 4, false };
+                toDraw += upgrades[ORBITAL_LAB];
+			while (toDraw >= 4 && bank[i].getMegaValue() && brain->wantMega(i)) {
+				card_t megaCard = { bank[i].getMegaValue(), i, 4, false };
 				addCard(megaCard);
 				toDraw -= 4;
 			}
             while (toDraw) {
-                addCard(decks[i]);
+                addCard(bank[i]);
                 --toDraw;
             }
 		}
 	}
     
-    void discardExcessProductionCards(decks_t &decks) {
+    void discardExcessProductionCards(bank_t &bank) {
         while (productionSize > productionLimit) {
-            discardCard(decks,brain->pickDiscard(productionCards));
+            discardCard(bank,brain->pickDiscard(hand));
         }
     }
     
@@ -247,14 +254,24 @@ public:
             productionLimit += 5;
         else if (upgrade == NODULE)
             colonistLimit += 3;
-        else if (upgrade == ROBOTS)
+        else if (upgrade == ROBOTICS)
             robots++;
-        else if (upgrade == LABORATORY)
+        else if (upgrade == LABORATORY) {
             factories[RESEARCH]++;
+            unmannedSlots++;
+        }
         else if (upgrade == OUTPOST) {
             colonistLimit += 5;
             productionLimit += 5;
             factories[TITANIUM]++;
+            unmannedSlots++;
+        }
+        // the last three upgrades are all special factories that must be manned
+        // but also can be manned regardless of the population limit.
+        else if (upgrade >= SPACE_STATION) {
+            factories[upgrade - SPACE_STATION + ORBITAL_MEDICINE]++;
+            extraColonistLimit++;
+            unmannedSlots++;
         }
     }
     
@@ -275,12 +292,80 @@ public:
         return (vps << 20) + (totalUpgradeCosts<<8);
     }
     
-    
-    void purchaseFactories(bool firstTurn) {
-        
+    void getMaxFactories(vector<uint8_t> &outFactories) {
+        outFactories.clear();
+        outFactories.resize(PRODUCTION_COUNT);
+        outFactories[ORE] = totalCredits / 10;
+        outFactories[WATER] = totalCredits / 20;
+        if (upgrades[HEAVY_EQUIPMENT])
+            outFactories[TITANIUM] = totalCredits / 30;
+        if (upgrades[LABORATORY])
+            outFactories[RESEARCH] = totalCredits / 30;
+        // Each new chemicals factory must be paid for with at least one research card
+        int numResearch = 0;
+        for (cardIt_t i=hand.begin(); i!=hand.end(); i++) {
+            numResearch += (i->prodType == RESEARCH);
+        }
+        outFactories[NEW_CHEMICALS] = totalCredits / 60;
+        if (outFactories[NEW_CHEMICALS] > numResearch)
+            outFactories[NEW_CHEMICALS] = numResearch;
+        // MICROBIOTICS, ORBITAL_MEDICINE, RING_ORE, and MOON_ORE factories are never
+        // directly purchased; they are part of upgrade purchases.
     }
     
-    void purchaseAndAssignPersonnel() {
+    void payFor(money_t cost,bank_t &bank,int minResearchCards) {
+        brain->payFor(cost,hand,bank,minResearchCards);
+    }
+    
+    void purchaseFactories(bool firstTurn,bank_t &bank) {
+        for (;;) {
+            vector<uint8_t> forPurchase;
+            getMaxFactories(forPurchase);
+            productionEnum_t whichFactory;
+            // special case - can always afford a water factory
+            if (firstTurn && !forPurchase[WATER] && hand.size() == 6)
+                forPurchase[WATER] = 1;
+            // otherwise if we cannot afford any ore, don't bother asking
+            else if (!forPurchase[ORE])
+                break;
+            else
+                firstTurn = false;  // clear flag if we don't need to remember this special case.
+
+            // ... ask which factory we want to purchase, and how many ...
+            amt_t numToBuy = brain->purchaseFactories(forPurchase,whichFactory);
+            if (numToBuy) {
+                static const uint8_t factoryCost[] = { 10,20,30,30,0,60,0,0,0 };
+                // if it's the first turn water special case, pay what we have instead of its actual cost.
+                brain->payFor(firstTurn&&whichFactory==WATER? totalCredits : numToBuy * factoryCost[whichFactory],hand,bank,whichFactory==NEW_CHEMICALS? numToBuy : 0);
+                factories[whichFactory] += numToBuy;
+                unmannedSlots += numToBuy;
+                // when we cycle up again there will be no special case.
+            }
+            else
+                break;
+        }
+    }
+    
+    void purchaseAndAssignPersonnel(bank_t &bank) {
+        if (colonists < colonistLimit + extraColonistLimit) {
+            money_t price = upgrades[ECOPLANTS]? 5: 10;
+            amt_t limit = colonistLimit + extraColonistLimit - colonists;
+            if (limit > totalCredits / price)
+                limit = totalCredits / price;
+            amt_t purchased = brain->purchaseColonists(price,limit);
+            colonists += purchased;
+            payFor(purchased * price,bank,0);
+        }
+        // you must have ROBOTICS in order to buy any.  there is no limit to how many you can buy,
+        // but you can only operate one per colonist per ROBOTICS upgrade owned.
+        if (upgrades[ROBOTICS]) {
+            money_t price = 10;
+            amt_t limit = totalCredits / price;
+            amt_t purchased = brain->purchaseRobots(price,limit,(upgrades[ROBOTICS] * (colonistLimit + extraColonistLimit)) - robots);
+            robots += purchased;
+            payFor(purchased * price,bank,0);
+        }        
+        brain->assignPersonnel();
     }
     
     const string& getName() const { return brain->getName(); }
@@ -307,7 +392,7 @@ public:
 				cout << factoryNames[i] << ":" << int(factories[i]) << "(" << int(mannedByColonists[i]) << 
 					"/" << int(mannedByRobots[i]) << ") ";
 		cout << "\n\tcards: ";
-		for (cardIt_t i=productionCards.begin(); i!=productionCards.end(); i++)
+		for (cardIt_t i=hand.begin(); i!=hand.end(); i++)
 			cout << factoryNames[i->prodType] << "/" << int(i->value) << "$ ";
 		cout << "(" << totalCredits << "$ total)\n";
 	}
@@ -315,7 +400,7 @@ public:
 
 
 class game_t {
-	vector<productionDeck_t> productionDecks;
+	vector<productionDeck_t> bank;
 	vector<uint8_t> upgradeDrawPiles;
 	vector<upgradeEnum_t> upgradeMarket;
 	vector<uint8_t> currentMarketCounts;
@@ -338,17 +423,17 @@ public:
 		static const cardDistribution_t RingOreDeck[] = { {30,1}, {35,3}, {40,4}, {45,3}, {50,1} };
 		static const cardDistribution_t MoonOreDeck[] = { {40,1}, {45,3}, {50,4}, {55,3}, {60,1} };
 
-		productionDecks.clear();
-		productionDecks.resize(PRODUCTION_COUNT);
-		productionDecks[ORE].init(ORE,OreDeck,NELEM(OreDeck),3,0,true);
-		productionDecks[WATER].init(WATER,WaterDeck,NELEM(WaterDeck),7,30,true);
-		productionDecks[TITANIUM].init(TITANIUM,TitaniumDeck,NELEM(TitaniumDeck),10,44,true);
-		productionDecks[RESEARCH].init(RESEARCH,ResearchDeck,NELEM(ResearchDeck),13,0,false);
-		productionDecks[MICROBIOTICS].init(MICROBIOTICS,MicrobioticsDeck,NELEM(MicrobioticsDeck),17,0,false);
-		productionDecks[NEW_CHEMICALS].init(NEW_CHEMICALS,NewChemicalsDeck,NELEM(NewChemicalsDeck),20,88,true);
-		productionDecks[ORBITAL_MEDICINE].init(ORBITAL_MEDICINE,OrbitalMedicineDeck,NELEM(OrbitalMedicineDeck),30,0,true);
-		productionDecks[RING_ORE].init(RING_ORE,RingOreDeck,NELEM(RingOreDeck),40,0,true);
-		productionDecks[MOON_ORE].init(MOON_ORE,MoonOreDeck,NELEM(MoonOreDeck),50,0,true);
+		bank.clear();
+		bank.resize(PRODUCTION_COUNT);
+		bank[ORE].init(ORE,OreDeck,NELEM(OreDeck),3,0,true);
+		bank[WATER].init(WATER,WaterDeck,NELEM(WaterDeck),7,30,true);
+		bank[TITANIUM].init(TITANIUM,TitaniumDeck,NELEM(TitaniumDeck),10,44,true);
+		bank[RESEARCH].init(RESEARCH,ResearchDeck,NELEM(ResearchDeck),13,0,false);
+		bank[MICROBIOTICS].init(MICROBIOTICS,MicrobioticsDeck,NELEM(MicrobioticsDeck),17,0,false);
+		bank[NEW_CHEMICALS].init(NEW_CHEMICALS,NewChemicalsDeck,NELEM(NewChemicalsDeck),20,88,true);
+		bank[ORBITAL_MEDICINE].init(ORBITAL_MEDICINE,OrbitalMedicineDeck,NELEM(OrbitalMedicineDeck),30,0,true);
+		bank[RING_ORE].init(RING_ORE,RingOreDeck,NELEM(RingOreDeck),40,0,true);
+		bank[MOON_ORE].init(MOON_ORE,MoonOreDeck,NELEM(MoonOreDeck),50,0,true);
 	}
 
 	void setupUpgradeDecks(playerIndex_t playerCount) {
@@ -399,8 +484,8 @@ public:
         // do initial production draws for each player
 		for (playerIt_t i=players.begin(); i!= players.end(); i++) {
             // production is doubled on first turn.
-            i->drawProductionCards(productionDecks);
-            i->drawProductionCards(productionDecks);
+            i->drawProductionCards(bank);
+            i->drawProductionCards(bank);
         }
         
         // randomly assign player order on first turn
@@ -498,13 +583,13 @@ public:
 
 	void drawProductionCards() {
 		for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
-			players[*i].drawProductionCards(productionDecks);
+			players[*i].drawProductionCards(bank);
 		}
 	}
 
 	void discardExcessProductionCards() {
 		for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
-			players[*i].discardExcessProductionCards(productionDecks);
+			players[*i].discardExcessProductionCards(bank);
 		}
 	}
 
@@ -543,7 +628,7 @@ public:
             cout << players[highBidder].getName() << " wins the auction for a " << upgradeNames[upgrade] << " with " << bid << " credits.\n";
             money_t discount = players[highBidder].computeDiscount(upgrade);
             if (bid > discount)
-                players[highBidder].getBrain().payFor(bid - discount,productionDecks);
+                players[highBidder].payFor(bid - discount,bank,0);
             players[highBidder].addUpgrade(upgrade);
         }
     }
@@ -551,8 +636,8 @@ public:
 	void performPlayerTurns(bool firstTurn) {
 		for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
             auctionUpgradeCards(*i);
-            players[*i].purchaseFactories(firstTurn);
-            players[*i].purchaseAndAssignPersonnel();
+            players[*i].purchaseFactories(firstTurn,bank);
+            players[*i].purchaseAndAssignPersonnel(bank);
         }        
 	}
 
@@ -600,12 +685,12 @@ public:
             value += 5; // a guess... should also see if we have any chance of affording a New Chem factory, and whether we even want one.
         return value;
     }
-    cardIndex_t pickDiscard(vector<card_t> &productionCards) {
+    cardIndex_t pickDiscard(vector<card_t> &hand) {
         // Just pick the cheapest card we have.
-        money_t guessValue = cardAdjustedValue(productionCards[0]);
+        money_t guessValue = cardAdjustedValue(hand[0]);
         cardIndex_t guessIndex = 0;
-        for (cardIndex_t i=1; i<productionCards.size(); i++) {
-            money_t thisValue = cardAdjustedValue(productionCards[i]);
+        for (cardIndex_t i=1; i<hand.size(); i++) {
+            money_t thisValue = cardAdjustedValue(hand[i]);
             if (thisValue < guessValue) {
                 guessValue = thisValue;
                 guessIndex = i;
@@ -620,7 +705,24 @@ public:
     money_t raiseOrPass(upgradeEnum_t upgrade,money_t bid) {
         return 0;   // never bids
     }
-    void payFor(money_t cost,decks_t &decks,productionEnum_t withAtLeastOne) {
+    money_t payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minResearchCards) {
+        return 0;
+    }
+    amt_t purchaseFactories(const vector<uint8_t> &maxByType,productionEnum_t &whichFactory) {
+        return 0;
+    }
+    amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) {
+        // buy as many colonists as we can afford and still house
+        if (perColonist * maxAllowed > player->getTotalCredits())
+            return player->getTotalCredits() / perColonist;
+        else
+            return maxAllowed;
+    }
+    amt_t purchaseRobots(money_t perRobot,amt_t maxAllowed,amt_t maxUsable) {
+        // buy as many robots as we can afford
+        return 0;
+    }
+    void assignPersonnel() {
     }
 };
 
@@ -633,18 +735,23 @@ public:
         getline(cin,answer);
         return toupper(answer[0]) == 'Y';
     }
-    cardIndex_t pickDiscard(vector<card_t> &productionCards) {
+    void displayProductionCards(vector<card_t> &hand) {
+        for (cardIndex_t i=0; i<hand.size(); i++)
+            cout << i << ". " << factoryNames[hand[i].prodType] << "/" << hand[i].value << "$" << endl;
+    }
+    unsigned readIndex() {
+        string answer;
+        getline(cin,answer);
+        return atoi(answer.c_str());
+    }
+    cardIndex_t pickDiscard(vector<card_t> &hand) {
         cout << name << ", you are over your hand limit.\n";
-        for (cardIndex_t i=0; i<productionCards.size(); i++)
-            cout << i << ". " << factoryNames[productionCards[i].prodType] << "/" << productionCards[i].value << "$" << endl;
-        
+        displayProductionCards(hand);
         cardIndex_t which = 0;
         do {
             cout << name << ", which card to you want to discard? ";
-            std::string answer;
-            getline(cin,answer);
-            which = atoi(answer.c_str());
-        } while (which >= productionCards.size());
+            which = readIndex();
+        } while (which >= hand.size());
         return which;
     }
     cardIndex_t pickCardToAuction(vector<upgradeEnum_t> &upgradeMarket,money_t &bid) {
@@ -653,9 +760,7 @@ public:
         cout << upgradeMarket.size() << ". (no auction)\n";
        cout << name << ", pick a card to auction?\n";
         for(;;) {
-            string answer;
-            getline(cin,answer);
-            cardIndex_t which = atoi(answer.c_str());
+            cardIndex_t which = readIndex();
             if (which > upgradeMarket.size())
                 continue;
             else if (which != upgradeMarket.size()) {
@@ -678,9 +783,7 @@ public:
             cout << name << ", the bid for " << upgradeNames[upgrade] << " is now at " << bid << ", enter a higher bid or 0 to pass: ";
         money_t newBid;
         for (;;) {
-            string answer;
-            getline(cin,answer);
-            newBid = atoi(answer.c_str());
+            newBid = readIndex();
             if (newBid == 0)
                 return 0;
             else if (newBid <= bid)
@@ -691,8 +794,64 @@ public:
                 return newBid;
         }
     }
-    void payFor(money_t cost,decks_t &decks,productionEnum_t withAtLeastOne) {
+    money_t payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minimumResearchCards) {
+        money_t paid = 0;
+        while (paid < cost || minimumResearchCards) {
+            if (cost >= 0) {
+                cout << name << ", you need to discard " << cost << " credits worth of cards";
+                if (minimumResearchCards)
+                    cout << " (at least " << minimumResearchCards << " more research cards)\n";
+                else
+                    cout << endl;
+            }
+            else
+                cout << name << ", you still need to discard " << minimumResearchCards << " more research cards!\n";
+            displayProductionCards(hand);
+            cout << "Enter a card, by number, to discard: ";
+            cardIndex_t which = readIndex();
+            if (which < hand.size()) {
+                cost -= hand[which].value;
+                if (hand[which].prodType == RESEARCH)
+                    --minimumResearchCards;
+                player->discardCard(bank,which);
+            }
+        }
+        return paid;
     }
+    amt_t purchaseFactories(const vector<uint8_t> &maxByType,productionEnum_t &whichFactory) {
+        cout << name << ", which factory would you like to purchase?\n";
+        for (productionEnum_t i=ORE; i<=NEW_CHEMICALS; i++)
+            if (maxByType[i])
+                cout << i << ". " << factoryNames[i] << " (at most " << int(maxByType[i]) << ")" << endl;
+        cout << "9. none\n";
+        whichFactory = (productionEnum_t) readIndex();
+        if (whichFactory > NEW_CHEMICALS || !maxByType[whichFactory])
+            return 0;
+        cout << "How many factories would you like to buy?  (at most " << int(maxByType[whichFactory]) << ") ";
+        amt_t numToBuy = readIndex();
+        if (numToBuy > maxByType[whichFactory])
+            numToBuy = maxByType[whichFactory];
+        return numToBuy;
+    }
+    amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) {
+        for(;;) {
+            cout << name << ", how many colonists do you want to buy at " << perColonist << " each? (at most " << maxAllowed << ") ";
+            amt_t amt = readIndex();
+            if (amt < maxAllowed)
+                return amt;
+        }
+    }
+    amt_t purchaseRobots(money_t perRobot,amt_t maxAllowed,amt_t maxUsable) {
+        for(;;) {
+            cout << name << ", how many robots do you want to buy at " << perRobot << " each? (at most " << maxAllowed << ", of which " << maxUsable << " can currently be used) ";
+            amt_t amt = readIndex();
+            if (amt < maxAllowed)
+                return amt;
+        }
+    }
+    void assignPersonnel() {
+    }
+
 };
 
 
