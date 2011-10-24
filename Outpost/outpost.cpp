@@ -13,29 +13,29 @@ enum productionEnum_t { ORE, WATER, TITANIUM, RESEARCH, MICROBIOTICS, NEW_CHEMIC
 const char *factoryNames[PRODUCTION_COUNT] = { "Ore", "Water", "Titanium", "Research", "Microbiotics", "NewChemicals", "OrbitalMedicine", "RingOre", "MoonOre" };
 
 enum upgradeEnum_t { 
-	DATA_LIBRARY, 
-	WAREHOUSE, 
-	HEAVY_EQUIPMENT, 
-	NODULE, 	// Era 1
-	SCIENTISTS, 
-	ORBITAL_LAB, 
-	ROBOTICS, 
-	LABORATORY, 
-	ECOPLANTS, 
-	OUTPOST, 	// Era 2
-	SPACE_STATION, 
-	PLANETARY_CRUISER, 
-	MOON_BASE,
-	UPGRADE_COUNT
+    DATA_LIBRARY, 
+    WAREHOUSE, 
+    HEAVY_EQUIPMENT, 
+    NODULE,     // Era 1
+    SCIENTISTS, 
+    ORBITAL_LAB, 
+    ROBOTICS, 
+    LABORATORY, 
+    ECOPLANTS, 
+    OUTPOST,     // Era 2
+    SPACE_STATION, 
+    PLANETARY_CRUISER, 
+    MOON_BASE,
+    UPGRADE_COUNT
 };
 
 const char *upgradeNames[UPGRADE_COUNT] = { "DataLibrary", "Warehouse", "HeavyEquipment", "Nodule", "Scientists", "OrbitalLab", "Robotics",
-	"Laboratory", "Ecoplants", "Outpost", "SpaceStation", "PlanetaryCruiser", "MoonBase" };
+    "Laboratory", "Ecoplants", "Outpost", "SpaceStation", "PlanetaryCruiser", "MoonBase" };
 
 
 const uint8_t upgradeCosts[UPGRADE_COUNT] = { 15,25,30,25,40, 50,50,80,30,100, 120,160,200 };
 
-#define NELEM(x)	(sizeof(x)/sizeof(x[0]))
+#define NELEM(x)    (sizeof(x)/sizeof(x[0]))
 
 
 inline int d4() { return rand() % 4; }
@@ -44,9 +44,9 @@ inline int d12() { return rand() % 12; }
 
 
 struct card_t {
-	uint8_t value,          // biggest card in game is 88, so 7 bits would be enough.
-		prodType:4,         // productionEnum_t
-		handSize:3,         // 0 for Research and Microbiotics.  4 for mega water, titanium, or new chem.  1 otherwise.
+    uint8_t value,          // biggest card in game is 88, so 7 bits would be enough.
+        prodType:4,         // productionEnum_t
+        handSize:3,         // 0 for Research and Microbiotics.  4 for mega water, titanium, or new chem.  1 otherwise.
         returnToDiscard:1;  // 1 if it goes to discard pile, 0 if "proxy" card or mega
     bool operator<(const card_t &that) const {
         return value < that.value || (value == that.value && prodType < that.prodType);
@@ -59,78 +59,78 @@ typedef unsigned amt_t;
 typedef int money_t;
 
 struct cardDistribution_t {
-	uint8_t value, count;
+    uint8_t value, count;
 };
 
 class productionDeck_t {
-	string name;
-	vector<uint8_t> deck;
-	typedef vector<uint8_t>::iterator deckIt_t;
-	vector<uint8_t> discards;
-	typedef vector<uint8_t>::iterator discardsIt_t;
-	uint8_t prodType;
-	uint8_t average;
-	uint8_t megaSize;
-	uint8_t countsInHandSize;
+    string name;
+    vector<uint8_t> deck;
+    typedef vector<uint8_t>::iterator deckIt_t;
+    vector<uint8_t> discards;
+    typedef vector<uint8_t>::iterator discardsIt_t;
+    uint8_t prodType;
+    uint8_t average;
+    uint8_t megaSize;
+    uint8_t countsInHandSize;
 public:
-	void init(productionEnum_t n,const cardDistribution_t *dist,size_t count,uint8_t avg,uint8_t mega,uint8_t isBig) {
-		deck.clear();
-		for (size_t i=0; i<count; i++) {
-			for (int j=0; j<dist[i].count; j++)
-				deck.push_back(dist[i].value);
-		}
-		shuffleDeck();
-		prodType = n;
-		average = avg;
-		megaSize = mega;
-		countsInHandSize = isBig;
-	}
+    void init(productionEnum_t n,const cardDistribution_t *dist,size_t count,uint8_t avg,uint8_t mega,uint8_t isBig) {
+        deck.clear();
+        for (size_t i=0; i<count; i++) {
+            for (int j=0; j<dist[i].count; j++)
+                deck.push_back(dist[i].value);
+        }
+        shuffleDeck();
+        prodType = n;
+        average = avg;
+        megaSize = mega;
+        countsInHandSize = isBig;
+    }
 
-	void shuffleDeck() {
-		random_shuffle(deck.begin(), deck.end());
-	}
+    void shuffleDeck() {
+        random_shuffle(deck.begin(), deck.end());
+    }
 
-	uint8_t getMegaValue() const {
-		return megaSize;
-	}
+    uint8_t getMegaValue() const {
+        return megaSize;
+    }
 
-	card_t drawCard() {
-		if (deck.size() == 0 && discards.size() != 0) {
-			// discards go to the draw pile, and discard deck is now empty
-			deck.swap(discards);
-			shuffleDeck();
-		}
+    card_t drawCard() {
+        if (deck.size() == 0 && discards.size() != 0) {
+            // discards go to the draw pile, and discard deck is now empty
+            deck.swap(discards);
+            shuffleDeck();
+        }
 
-		card_t newCard;
-		newCard.prodType = prodType;
-		newCard.handSize = countsInHandSize;
-		// if the discard pile was empty too, synthesize a fake card having the average value.
-		// note in the real game you'd track this on paper and it would disappear when spent.
-		// in this version, the fake card will make it back into the (now larger) production deck.
-		if (deck.size() == 0) {
-			newCard.value = average;
+        card_t newCard;
+        newCard.prodType = prodType;
+        newCard.handSize = countsInHandSize;
+        // if the discard pile was empty too, synthesize a fake card having the average value.
+        // note in the real game you'd track this on paper and it would disappear when spent.
+        // in this version, the fake card will make it back into the (now larger) production deck.
+        if (deck.size() == 0) {
+            newCard.value = average;
             newCard.returnToDiscard = false;
         }
-		else {
-			// otherwise take the top of the draw deck and consume it, return it to caller
-			newCard.value = deck.back();
+        else {
+            // otherwise take the top of the draw deck and consume it, return it to caller
+            newCard.value = deck.back();
             newCard.returnToDiscard = true;
-			deck.pop_back();
-		}
-		return newCard;
-	}
+            deck.pop_back();
+        }
+        return newCard;
+    }
     
     void discardCard(uint8_t value) {
         discards.push_back(value);
     }
 
-	void dump() {
-		cout << factoryNames[prodType] << " deck: ";
-		for (deckIt_t i=deck.begin(); i!=deck.end(); i++) {
-			cout << int(*i) << " ";
-		}
-		cout << "<- top\n";
-	}
+    void dump() {
+        cout << factoryNames[prodType] << " deck: ";
+        for (deckIt_t i=deck.begin(); i!=deck.end(); i++) {
+            cout << int(*i) << " ";
+        }
+        cout << "<- top\n";
+    }
 };
 
 typedef vector<productionDeck_t> bank_t;
@@ -139,15 +139,15 @@ class player_t;
 
 class brain_t {
 protected:
-	string name;
+    string name;
     player_t *player;
 public:
-	brain_t(string n) : name(n) { }
-	virtual ~brain_t() { }
+    brain_t(string n) : name(n) { }
+    virtual ~brain_t() { }
     const string& getName() const { return name; }
     void setPlayer(player_t &p) { player = &p; }
 
-	virtual bool wantMega(productionEnum_t) = 0;
+    virtual bool wantMega(productionEnum_t) = 0;
     virtual cardIndex_t pickDiscard(vector<card_t> &hand) = 0;
     virtual cardIndex_t pickCardToAuction(vector<card_t> &hand,vector<upgradeEnum_t> &upgradeMarket,money_t &bid) = 0;
     virtual money_t raiseOrPass(vector<card_t> &hand,upgradeEnum_t upgrade,money_t bid) = 0;
@@ -159,31 +159,31 @@ public:
 };
 
 class player_t {
-	vector<card_t> hand;
-	typedef vector<card_t>::iterator cardIt_t;
-	uint8_t colonists, colonistLimit, extraColonistLimit, robots, productionSize, productionLimit, unmannedSlots;
-	money_t totalCredits, totalUpgradeCosts;
-	vector<uint8_t> factories;
-	vector<uint8_t> mannedByColonists;
-	vector<uint8_t> mannedByRobots;
+    vector<card_t> hand;
+    typedef vector<card_t>::iterator cardIt_t;
+    uint8_t colonists, colonistLimit, extraColonistLimit, robots, productionSize, productionLimit, unmannedSlots;
+    money_t totalCredits, totalUpgradeCosts;
+    vector<uint8_t> factories;
+    vector<uint8_t> mannedByColonists;
+    vector<uint8_t> mannedByRobots;
     vector<uint8_t> upgrades;
-	brain_t *brain;
+    brain_t *brain;
 public:
-	player_t() {
-		colonists = 3;
-		colonistLimit = 5;
+    player_t() {
+        colonists = 3;
+        colonistLimit = 5;
         extraColonistLimit = 0;
         robots = 0; // active robots limit is colonistLimit times number of robotics upgrades.
         productionLimit = 10;
-		productionSize = 0;
-		factories.resize(PRODUCTION_COUNT);
+        productionSize = 0;
+        factories.resize(PRODUCTION_COUNT);
         // the last element of these two arrays is used to hold personnnel not assigned to any factory
-		mannedByColonists.resize(PRODUCTION_COUNT+1);
-		mannedByRobots.resize(PRODUCTION_COUNT+1);
+        mannedByColonists.resize(PRODUCTION_COUNT+1);
+        mannedByRobots.resize(PRODUCTION_COUNT+1);
         upgrades.resize(UPGRADE_COUNT);
-		totalCredits = 0;
+        totalCredits = 0;
         totalUpgradeCosts = 0;
-		brain = 0;
+        brain = 0;
 
         factories[ORE] = 2;
         mannedByColonists[ORE] = 2;
@@ -191,25 +191,25 @@ public:
         mannedByColonists[WATER] = 1;
     }
     
-  	~player_t() {
-		delete brain;
-	}
+      ~player_t() {
+        delete brain;
+    }
 
-	void setBrain(brain_t &b) {
-		if (brain)
-			delete brain;
-		brain = &b;
-	}
+    void setBrain(brain_t &b) {
+        if (brain)
+            delete brain;
+        brain = &b;
+    }
 
-	void addCard(productionDeck_t &fromDeck) {
-		addCard(fromDeck.drawCard());
-	}
+    void addCard(productionDeck_t &fromDeck) {
+        addCard(fromDeck.drawCard());
+    }
 
-	void addCard(card_t newCard) {
-		hand.push_back(newCard);
-		productionSize += newCard.handSize;
-		totalCredits += newCard.value;
-	}
+    void addCard(card_t newCard) {
+        hand.push_back(newCard);
+        productionSize += newCard.handSize;
+        totalCredits += newCard.value;
+    }
     
     void discardCard(bank_t &bank,cardIndex_t which) {
         card_t discard = hand[which];
@@ -221,30 +221,30 @@ public:
             bank[discard.prodType].discardCard(discard.value);
     }
 
-	void drawProductionCards(bank_t &bank,bool firstTurn) {
-		for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++) {
-			int toDraw = mannedByColonists[i] + mannedByRobots[i];
+    void drawProductionCards(bank_t &bank,bool firstTurn) {
+        for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++) {
+            int toDraw = mannedByColonists[i] + mannedByRobots[i];
             // special case: each scientist upgrade produces a research card without being populated.
             if (i==RESEARCH)
                 toDraw += upgrades[SCIENTISTS];
             else if (i==MICROBIOTICS)
                 toDraw += upgrades[ORBITAL_LAB];
             toDraw <<= firstTurn;   // double production on first turn
-			while (toDraw >= 4 && bank[i].getMegaValue() && brain->wantMega(i)) {
-				card_t megaCard = { bank[i].getMegaValue(), i, 4, false };
-				addCard(megaCard);
-				toDraw -= 4;
+            while (toDraw >= 4 && bank[i].getMegaValue() && brain->wantMega(i)) {
+                card_t megaCard = { bank[i].getMegaValue(), i, 4, false };
+                addCard(megaCard);
+                toDraw -= 4;
                 cout << getName() << " draws a " << factoryNames[i] << " mega production card.\n";
-			}
+            }
             if (toDraw)
                 cout << getName() << " draws " << toDraw << " " << factoryNames[i] << " production cards.\n";
             while (toDraw) {
                 addCard(bank[i]);
                 --toDraw;
             }
-		}
+        }
         sort(hand.begin(),hand.end());
-	}
+    }
     
     void discardExcessProductionCards(bank_t &bank) {
         while (productionSize > productionLimit) {
@@ -409,135 +409,135 @@ public:
     
     money_t getTotalCredits() const { return totalCredits; }
     
-	void dump() {
-		cout << "player " << brain->getName() << ", " << int(colonists) << "/" << int(colonistLimit) << " colonists, " << int(productionSize) << "/" << int(productionLimit) << " cards\n\tfactories: ";
-		for (int i=ORE; i<PRODUCTION_COUNT; i++)
-			if (factories[i])
-				cout << factoryNames[i] << ":" << int(factories[i]) << "(" << int(mannedByColonists[i]) << 
-					"/" << int(mannedByRobots[i]) << ") ";
-		cout << "\n\tcards: ";
-		for (cardIt_t i=hand.begin(); i!=hand.end(); i++)
-			cout << factoryNames[i->prodType] << "/" << int(i->value) << "$ ";
-		cout << "(" << totalCredits << "$ total)\n";
-	}
+    void dump() {
+        cout << "player " << brain->getName() << ", " << int(colonists) << "/" << int(colonistLimit) << " colonists, " << int(productionSize) << "/" << int(productionLimit) << " cards\n\tfactories: ";
+        for (int i=ORE; i<PRODUCTION_COUNT; i++)
+            if (factories[i])
+                cout << factoryNames[i] << ":" << int(factories[i]) << "(" << int(mannedByColonists[i]) << 
+                    "/" << int(mannedByRobots[i]) << ") ";
+        cout << "\n\tcards: ";
+        for (cardIt_t i=hand.begin(); i!=hand.end(); i++)
+            cout << factoryNames[i->prodType] << "/" << int(i->value) << "$ ";
+        cout << "(" << totalCredits << "$ total)\n";
+    }
 };
 
 
 class game_t {
-	vector<productionDeck_t> bank;
-	vector<uint8_t> upgradeDrawPiles;
-	vector<upgradeEnum_t> upgradeMarket;
-	vector<uint8_t> currentMarketCounts;
-	vector<player_t> players;
-	typedef vector<player_t>::iterator playerIt_t;
-	vector<uint8_t> playerOrder;
-	typedef vector<uint8_t>::iterator playerOrderIt_t;
-	uint8_t era, marketLimit;
+    vector<productionDeck_t> bank;
+    vector<uint8_t> upgradeDrawPiles;
+    vector<upgradeEnum_t> upgradeMarket;
+    vector<uint8_t> currentMarketCounts;
+    vector<player_t> players;
+    typedef vector<player_t>::iterator playerIt_t;
+    vector<uint8_t> playerOrder;
+    typedef vector<uint8_t>::iterator playerOrderIt_t;
+    uint8_t era, marketLimit;
     uint8_t highestVp;
-	bool previousMarketEmpty;
+    bool previousMarketEmpty;
 public:
     game_t(playerIndex_t playerCount) {
         // default ctor sets up a bunch of game state
-		players.resize(playerCount);
+        players.resize(playerCount);
 
-		era = 1;
+        era = 1;
         highestVp = 3;
-		previousMarketEmpty = false;
-		upgradeMarket.clear();
-		currentMarketCounts.clear();
-		currentMarketCounts.resize(UPGRADE_COUNT);
+        previousMarketEmpty = false;
+        upgradeMarket.clear();
+        currentMarketCounts.clear();
+        currentMarketCounts.resize(UPGRADE_COUNT);
         marketLimit = playerCount >> 1;
     }
     
-	void setupProductionDecks() {
-		static const cardDistribution_t OreDeck[] = { {1,4}, {2,6}, {3,6}, {4,6}, {5,4} };
-		static const cardDistribution_t WaterDeck[] = { {4,2}, {5,5}, {6,7}, {7,9}, {8,7}, {9,5}, {10,3} };
-		static const cardDistribution_t TitaniumDeck[] = { {7,5}, {8,7}, {9,9}, {10,11}, {11,9}, {12,7}, {13,5} };
-		static const cardDistribution_t ResearchDeck[] = { {9,2}, {10,3}, {11,4}, {12,5}, {13,6}, {14,5}, {15,4}, {16,3}, {17,2} };
-		static const cardDistribution_t MicrobioticsDeck[] = { {14,1}, {15,2}, {16,3}, {17,4}, {18,3}, {19,2}, {20,1} };
-		static const cardDistribution_t NewChemicalsDeck[] = { {14,2}, {16,3}, {18,4}, {20,5}, {22,4}, {24,3}, {26,2} };
-		static const cardDistribution_t OrbitalMedicineDeck[] = { {20,2}, {25,3}, {30,4}, {35,3}, {40,2} };
-		static const cardDistribution_t RingOreDeck[] = { {30,1}, {35,3}, {40,4}, {45,3}, {50,1} };
-		static const cardDistribution_t MoonOreDeck[] = { {40,1}, {45,3}, {50,4}, {55,3}, {60,1} };
+    void setupProductionDecks() {
+        static const cardDistribution_t OreDeck[] = { {1,4}, {2,6}, {3,6}, {4,6}, {5,4} };
+        static const cardDistribution_t WaterDeck[] = { {4,2}, {5,5}, {6,7}, {7,9}, {8,7}, {9,5}, {10,3} };
+        static const cardDistribution_t TitaniumDeck[] = { {7,5}, {8,7}, {9,9}, {10,11}, {11,9}, {12,7}, {13,5} };
+        static const cardDistribution_t ResearchDeck[] = { {9,2}, {10,3}, {11,4}, {12,5}, {13,6}, {14,5}, {15,4}, {16,3}, {17,2} };
+        static const cardDistribution_t MicrobioticsDeck[] = { {14,1}, {15,2}, {16,3}, {17,4}, {18,3}, {19,2}, {20,1} };
+        static const cardDistribution_t NewChemicalsDeck[] = { {14,2}, {16,3}, {18,4}, {20,5}, {22,4}, {24,3}, {26,2} };
+        static const cardDistribution_t OrbitalMedicineDeck[] = { {20,2}, {25,3}, {30,4}, {35,3}, {40,2} };
+        static const cardDistribution_t RingOreDeck[] = { {30,1}, {35,3}, {40,4}, {45,3}, {50,1} };
+        static const cardDistribution_t MoonOreDeck[] = { {40,1}, {45,3}, {50,4}, {55,3}, {60,1} };
 
-		bank.clear();
-		bank.resize(PRODUCTION_COUNT);
-		bank[ORE].init(ORE,OreDeck,NELEM(OreDeck),3,0,true);
-		bank[WATER].init(WATER,WaterDeck,NELEM(WaterDeck),7,30,true);
-		bank[TITANIUM].init(TITANIUM,TitaniumDeck,NELEM(TitaniumDeck),10,44,true);
-		bank[RESEARCH].init(RESEARCH,ResearchDeck,NELEM(ResearchDeck),13,0,false);
-		bank[MICROBIOTICS].init(MICROBIOTICS,MicrobioticsDeck,NELEM(MicrobioticsDeck),17,0,false);
-		bank[NEW_CHEMICALS].init(NEW_CHEMICALS,NewChemicalsDeck,NELEM(NewChemicalsDeck),20,88,true);
-		bank[ORBITAL_MEDICINE].init(ORBITAL_MEDICINE,OrbitalMedicineDeck,NELEM(OrbitalMedicineDeck),30,0,true);
-		bank[RING_ORE].init(RING_ORE,RingOreDeck,NELEM(RingOreDeck),40,0,true);
-		bank[MOON_ORE].init(MOON_ORE,MoonOreDeck,NELEM(MoonOreDeck),50,0,true);
-	}
+        bank.clear();
+        bank.resize(PRODUCTION_COUNT);
+        bank[ORE].init(ORE,OreDeck,NELEM(OreDeck),3,0,true);
+        bank[WATER].init(WATER,WaterDeck,NELEM(WaterDeck),7,30,true);
+        bank[TITANIUM].init(TITANIUM,TitaniumDeck,NELEM(TitaniumDeck),10,44,true);
+        bank[RESEARCH].init(RESEARCH,ResearchDeck,NELEM(ResearchDeck),13,0,false);
+        bank[MICROBIOTICS].init(MICROBIOTICS,MicrobioticsDeck,NELEM(MicrobioticsDeck),17,0,false);
+        bank[NEW_CHEMICALS].init(NEW_CHEMICALS,NewChemicalsDeck,NELEM(NewChemicalsDeck),20,88,true);
+        bank[ORBITAL_MEDICINE].init(ORBITAL_MEDICINE,OrbitalMedicineDeck,NELEM(OrbitalMedicineDeck),30,0,true);
+        bank[RING_ORE].init(RING_ORE,RingOreDeck,NELEM(RingOreDeck),40,0,true);
+        bank[MOON_ORE].init(MOON_ORE,MoonOreDeck,NELEM(MoonOreDeck),50,0,true);
+    }
 
-	void setupUpgradeDecks(playerIndex_t playerCount) {
-		upgradeDrawPiles.clear();
-		upgradeDrawPiles.reserve(PRODUCTION_COUNT);
-		if (playerCount == 2) {
-			int even = 0, odd = 0;
+    void setupUpgradeDecks(playerIndex_t playerCount) {
+        upgradeDrawPiles.clear();
+        upgradeDrawPiles.reserve(PRODUCTION_COUNT);
+        if (playerCount == 2) {
+            int even = 0, odd = 0;
             upgradeEnum_t i;
-			for (i=DATA_LIBRARY; i<UPGRADE_COUNT; i++) {
-				if (rand() & 1) {
-					upgradeDrawPiles.push_back(1);
-					if (++odd == 10)
-						break;
-				}
-				else {
-					upgradeDrawPiles.push_back(2);
-					if (++even == 10)
-						break;
-				}
-			}
-			// at most 10 upgrade types allowed with one count
-			for (; i<UPGRADE_COUNT; i++) {
-				upgradeDrawPiles.push_back((odd == 10)? 2 : 1);
-			}
-		}
-		else {
-			static const uint8_t upgrades_1_10[10] = { 0,0,0, 2,3,3,4,5,5,6 };
-			static const uint8_t upgrades_11_13[10] = { 0,0,0, 2,3,4,4,5,6,6 };
-			for (upgradeEnum_t i=DATA_LIBRARY; i<SPACE_STATION; i++)
-				upgradeDrawPiles.push_back(upgrades_1_10[playerCount]);
-			for (upgradeEnum_t i=SPACE_STATION; i<UPGRADE_COUNT; i++)
-				upgradeDrawPiles.push_back(upgrades_11_13[playerCount]);
-		}
-	}
+            for (i=DATA_LIBRARY; i<UPGRADE_COUNT; i++) {
+                if (rand() & 1) {
+                    upgradeDrawPiles.push_back(1);
+                    if (++odd == 10)
+                        break;
+                }
+                else {
+                    upgradeDrawPiles.push_back(2);
+                    if (++even == 10)
+                        break;
+                }
+            }
+            // at most 10 upgrade types allowed with one count
+            for (; i<UPGRADE_COUNT; i++) {
+                upgradeDrawPiles.push_back((odd == 10)? 2 : 1);
+            }
+        }
+        else {
+            static const uint8_t upgrades_1_10[10] = { 0,0,0, 2,3,3,4,5,5,6 };
+            static const uint8_t upgrades_11_13[10] = { 0,0,0, 2,3,4,4,5,6,6 };
+            for (upgradeEnum_t i=DATA_LIBRARY; i<SPACE_STATION; i++)
+                upgradeDrawPiles.push_back(upgrades_1_10[playerCount]);
+            for (upgradeEnum_t i=SPACE_STATION; i<UPGRADE_COUNT; i++)
+                upgradeDrawPiles.push_back(upgrades_11_13[playerCount]);
+        }
+    }
 
-	void setInitialPlayerState(playerIndex_t playerCount) {
+    void setInitialPlayerState(playerIndex_t playerCount) {
         // do initial production draws for each player
-		for (playerIt_t i=players.begin(); i!= players.end(); i++)
+        for (playerIt_t i=players.begin(); i!= players.end(); i++)
             // production is doubled on first turn.
             i->drawProductionCards(bank,true);
         
         // randomly assign player order on first turn
-		playerOrder.clear();
-		playerOrder.resize(playerCount);
-		for (int i=0; i<playerOrder.size(); i++)
-			playerOrder[i] = i;
-		random_shuffle(playerOrder.begin(), playerOrder.end());
-	}
+        playerOrder.clear();
+        playerOrder.resize(playerCount);
+        for (int i=0; i<playerOrder.size(); i++)
+            playerOrder[i] = i;
+        random_shuffle(playerOrder.begin(), playerOrder.end());
+    }
 
 
-	void setupGame() {
-		setupProductionDecks();
-		setupUpgradeDecks(players.size());
-		setInitialPlayerState(players.size());
+    void setupGame() {
+        setupProductionDecks();
+        setupUpgradeDecks(players.size());
+        setInitialPlayerState(players.size());
         replaceUpgradeCards();
-	}
+    }
 
-	void setPlayerBrain(playerIndex_t index,brain_t &brain) {
-		players[index].setBrain(brain);
+    void setPlayerBrain(playerIndex_t index,brain_t &brain) {
+        players[index].setBrain(brain);
         brain.setPlayer(players[index]);
         // players[index].dump();
-	}
+    }
     
-	void determinePlayerOrder() {
-		// player order is determined by number of victory points
-		// ties are broken by total cost of purchased upgrades (and special factories)
-		// beyond that, ties are broken randomly by assigning some random bits to the LSB's
+    void determinePlayerOrder() {
+        // player order is determined by number of victory points
+        // ties are broken by total cost of purchased upgrades (and special factories)
+        // beyond that, ties are broken randomly by assigning some random bits to the LSB's
         // and finally beyond that, ties are broken by ordinal value
         vector<unsigned> playerVps;
         for (playerIndex_t i=0; i<players.size(); i++)
@@ -550,27 +550,27 @@ public:
             playerOrder.push_back(playerVps.back() & 0xF);
             playerVps.pop_back();
         }
-	}
+    }
     
     void displayPlayerOrder() {
         for (playerIndex_t i=0; i<playerOrder.size(); i++)
             cout << players[playerOrder[i]].getName() << " is Player " << i+1 << " this round (" << (players[playerOrder[i]].computeScaledVictoryPoints() >> 20) << " VPs).\n";
     }
 
-	void replaceUpgradeCards() {
-		// figure out whether the market is totally empty or not
-		bool marketEmpty = upgradeMarket.size() == 0;
-		for (upgradeEnum_t i=DATA_LIBRARY; i<(era==1?SCIENTISTS:SPACE_STATION) && marketEmpty; i++)
-			if (upgradeDrawPiles[i])
-				marketEmpty = false;
-		static const uint8_t minVpsForEra3[] = { 0,0,40,35,40,30,35,40,30,35 };
+    void replaceUpgradeCards() {
+        // figure out whether the market is totally empty or not
+        bool marketEmpty = upgradeMarket.size() == 0;
+        for (upgradeEnum_t i=DATA_LIBRARY; i<(era==1?SCIENTISTS:SPACE_STATION) && marketEmpty; i++)
+            if (upgradeDrawPiles[i])
+                marketEmpty = false;
+        static const uint8_t minVpsForEra3[] = { 0,0,40,35,40,30,35,40,30,35 };
 
-		// figure out which era we're in now.
-		if (era == 1 && (highestVp >= 10 || (marketEmpty && previousMarketEmpty)))
-			era = 2;
-		else if (era == 2 && (highestVp >= minVpsForEra3[players.size()] || (marketEmpty && previousMarketEmpty)))
-			era = 3;
-		previousMarketEmpty = marketEmpty;
+        // figure out which era we're in now.
+        if (era == 1 && (highestVp >= 10 || (marketEmpty && previousMarketEmpty)))
+            era = 2;
+        else if (era == 2 && (highestVp >= minVpsForEra3[players.size()] || (marketEmpty && previousMarketEmpty)))
+            era = 3;
+        previousMarketEmpty = marketEmpty;
         
         while (upgradeMarket.size() < players.size()) {
             // First check if any roll has a chance to succeeed
@@ -601,19 +601,19 @@ public:
             currentMarketCounts[roll]++;
             upgradeMarket.push_back(roll);
         }
-	}
+    }
 
-	void drawProductionCards() {
-		for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
-			players[*i].drawProductionCards(bank,false);
-		}
-	}
+    void drawProductionCards() {
+        for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
+            players[*i].drawProductionCards(bank,false);
+        }
+    }
 
-	void discardExcessProductionCards() {
-		for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
-			players[*i].discardExcessProductionCards(bank);
-		}
-	}
+    void discardExcessProductionCards() {
+        for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
+            players[*i].discardExcessProductionCards(bank);
+        }
+    }
 
     void auctionUpgradeCards(playerIndex_t selfIndex) {
         cardIndex_t nextAuction;
@@ -657,15 +657,15 @@ public:
         }
     }
 
-	void performPlayerTurns(bool firstTurn) {
-		for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
+    void performPlayerTurns(bool firstTurn) {
+        for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
             auctionUpgradeCards(*i);
             players[*i].purchaseFactories(firstTurn,bank);
             players[*i].purchaseAndAssignPersonnel(bank);
         }        
-	}
+    }
 
-	bool checkVictoryConditions() {
+    bool checkVictoryConditions() {
         playerIndex_t winnerIndex = 0;
         unsigned winnerScore = 0;
         highestVp = 0;
@@ -689,20 +689,20 @@ public:
                 cout << players[i].getName() << " wins!\n";
         }        
         return true;
-	}
+    }
 };
 
 
 class computerBrain_t: public brain_t {
-	const game_t &game;
+    const game_t &game;
 public:
-	computerBrain_t(std::string name,const game_t &theGame) : brain_t(name), game(theGame) { } 
-	bool wantMega(productionEnum_t) { 
-		// this decision is hard -- need to factor in what cards we think are left in the deck,
-		// and whether we're making any big purchases this turn, and whether we'd be over our
-		// hand limit and have to discard.
-		return false; 
-	}
+    computerBrain_t(std::string name,const game_t &theGame) : brain_t(name), game(theGame) { } 
+    bool wantMega(productionEnum_t) { 
+        // this decision is hard -- need to factor in what cards we think are left in the deck,
+        // and whether we're making any big purchases this turn, and whether we'd be over our
+        // hand limit and have to discard.
+        return false; 
+    }
     money_t cardAdjustedValue(card_t &card) {
         money_t value = card.value;
         if (card.prodType == RESEARCH)
@@ -764,7 +764,7 @@ static char readLetter() {
 
 class playerBrain_t: public brain_t {
 public:
-	playerBrain_t(std::string name) : brain_t(name) { }
+    playerBrain_t(std::string name) : brain_t(name) { }
     bool wantMega(productionEnum_t t) {
         cout << name << ", do you want a megaproduction card for " << factoryNames[t] << "? ";
         return readLetter() == 'Y';
@@ -943,19 +943,19 @@ public:
 
 
 int main() {
-	unsigned playerCount;
+    unsigned playerCount;
 
     // seed the RNG, but let it be overridden from user input
     unsigned seed = (unsigned) time(NULL);
     
-	for (;;) {
-		cout << "Number of players?  (2-9) ";
+    for (;;) {
+        cout << "Number of players?  (2-9) ";
         playerCount = readUnsigned();
         if (playerCount < 2 || playerCount > 9)
             seed = playerCount;
         else
             break;
-	}
+    }
 
     cout << "(using " << seed << " as RNG seed)" << endl;
     srand(seed);
@@ -977,9 +977,9 @@ int main() {
     // attach brains to each player
     cout << "If you enter an empty string for a name, that and all future players will be run by computer.\n";
     cout << "Players should be entered in seating order (aka auction bidding order).\n";
-	bool anyHumans = true;
+    bool anyHumans = true;
     for (int i=0; i<playerCount; i++) {
-		string name;
+        string name;
         if (anyHumans) {
             cout << "Player " << i+1 << " name? ";
             getline(cin,name);
@@ -995,22 +995,22 @@ int main() {
         else
             thisBrain = new playerBrain_t(name);
             
-  		game.setPlayerBrain(i,*thisBrain);
-	}
+          game.setPlayerBrain(i,*thisBrain);
+    }
 
     // set up the play area, deal hands, etc
-	game.setupGame();
+    game.setupGame();
     // do the first turn of the game (several phases are skipped, victory is impossible and so is an era change
     game.displayPlayerOrder();
-	game.performPlayerTurns(true);
+    game.performPlayerTurns(true);
     
     // now enter the normal turn progression
-	do {
-		game.determinePlayerOrder();
+    do {
+        game.determinePlayerOrder();
         game.displayPlayerOrder();
-		game.replaceUpgradeCards();
-		game.drawProductionCards();
-		game.discardExcessProductionCards();
-		game.performPlayerTurns(false);
-	} while (!game.checkVictoryConditions());
+        game.replaceUpgradeCards();
+        game.drawProductionCards();
+        game.discardExcessProductionCards();
+        game.performPlayerTurns(false);
+    } while (!game.checkVictoryConditions());
 }
