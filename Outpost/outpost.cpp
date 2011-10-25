@@ -22,6 +22,8 @@ enum productionEnum_t { ORE, WATER, TITANIUM, RESEARCH, MICROBIOTICS, NEW_CHEMIC
 
 const char *factoryNames[PRODUCTION_COUNT] = { "Ore", "Water", "Titanium", "Research", "Microbiotics", "NewChemicals", "OrbitalMedicine", "RingOre", "MoonOre" };
 
+static const byte_t factoryCosts[] = { 10,20,30,30,0,60,0,0,0 };
+
 enum upgradeEnum_t { 
     DATA_LIBRARY, 
     WAREHOUSE, 
@@ -114,8 +116,6 @@ public:
         newCard.prodType = prodType;
         newCard.handSize = countsInHandSize;
         // if the discard pile was empty too, synthesize a fake card having the average value.
-        // note in the real game you'd track this on paper and it would disappear when spent.
-        // in this version, the fake card will make it back into the (now larger) production deck.
         if (deck.size() == 0) {
             newCard.value = average;
             newCard.returnToDiscard = false;
@@ -228,14 +228,15 @@ public:
         hand.erase(hand.begin() + which);
         productionSize -= discard.handSize;
         totalCredits -= discard.value;
-        if (discard.returnToDiscard)  // mega cards don't go into same deck
+        if (discard.returnToDiscard)  // mega cards (and virtual cards) don't go into same deck
             bank[discard.prodType].discardCard(discard.value);
     }
 
     void drawProductionCards(bank_t &bank,bool firstTurn) {
         for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++) {
             int toDraw = mannedByColonists[i] + mannedByRobots[i];
-            // special case: each scientist upgrade produces a research card without being populated.
+            // special cases: each scientist upgrade produces a research card without being populated.
+            // same for microbiotics.
             if (i==RESEARCH)
                 toDraw += upgrades[SCIENTISTS];
             else if (i==MICROBIOTICS)
@@ -245,7 +246,7 @@ public:
                 card_t megaCard = { bank[i].getMegaValue(), i, 4, false };
                 addCard(megaCard);
                 toDraw -= 4;
-                cout << getName() << " draws a " << factoryNames[i] << " mega production card.\n";
+                cout << getName() << " draws " << factoryNames[i] << " mega production card.\n";
             }
             if (toDraw)
                 cout << getName() << " draws " << toDraw << " " << factoryNames[i] << " production card" << (toDraw>1?"s":"") << ".\n";
@@ -308,28 +309,29 @@ public:
             vps += vpsForUpgrade[i] * upgrades[i];
         }
         // now include victory points for factories which are manned
+        // note that microbiotics is counted during upgrades and can never be manned.
+        // scientists are counted during upgrades as well but you can also buy/man research factories so they're counted here.
         for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++) {
-            static const byte_t vpsForMannedFactory[PRODUCTION_COUNT] = { 1,1,2,2,3,3,10,15,20 };
+            static const byte_t vpsForMannedFactory[PRODUCTION_COUNT] = { 1,1,2,2,0,3,10,15,20 };
             vps += vpsForMannedFactory[i] * (mannedByColonists[i] + mannedByRobots[i]);
         }
         return vps;
     }
-    
+
     void getMaxFactories(vector<byte_t> &outFactories) {
         outFactories.clear();
         outFactories.resize(PRODUCTION_COUNT);
-        outFactories[ORE] = totalCredits / 10;
-        outFactories[WATER] = totalCredits / 20;
+        outFactories[ORE] = totalCredits / factoryCosts[ORE];
+        outFactories[WATER] = totalCredits / factoryCosts[WATER];
         if (upgrades[HEAVY_EQUIPMENT])
-            outFactories[TITANIUM] = totalCredits / 30;
+            outFactories[TITANIUM] = totalCredits / factoryCosts[TITANIUM];
         if (upgrades[LABORATORY])
-            outFactories[RESEARCH] = totalCredits / 30;
+            outFactories[RESEARCH] = totalCredits / factoryCosts[RESEARCH];
         // Each new chemicals factory must be paid for with at least one research card
         int numResearch = 0;
-        for (cardIt_t i=hand.begin(); i!=hand.end(); i++) {
+        for (cardIt_t i=hand.begin(); i!=hand.end(); i++)
             numResearch += (i->prodType == RESEARCH);
-        }
-        outFactories[NEW_CHEMICALS] = totalCredits / 60;
+        outFactories[NEW_CHEMICALS] = totalCredits / factoryCosts[NEW_CHEMICALS];
         if (outFactories[NEW_CHEMICALS] > numResearch)
             outFactories[NEW_CHEMICALS] = numResearch;
         // MICROBIOTICS, ORBITAL_MEDICINE, RING_ORE, and MOON_ORE factories are never
@@ -365,9 +367,8 @@ public:
             // ... ask which factory we want to purchase, and how many ...
             amt_t numToBuy = brain->purchaseFactories(forPurchase,whichFactory);
             if (numToBuy) {
-                static const byte_t factoryCost[] = { 10,20,30,30,0,60,0,0,0 };
                 // if it's the first turn water special case, pay what we have instead of its actual cost.
-                brain->payFor(firstTurn&&whichFactory==WATER? totalCredits : numToBuy * factoryCost[whichFactory],hand,bank,whichFactory==NEW_CHEMICALS? numToBuy : 0);
+                brain->payFor(firstTurn&&whichFactory==WATER? totalCredits : numToBuy * factoryCosts[whichFactory],hand,bank,whichFactory==NEW_CHEMICALS? numToBuy : 0);
                 cout << getName() << " bought " << numToBuy << " " << factoryNames[whichFactory] << " factor" << (numToBuy>1?"ies":"y") << ".\n";
                 factories[whichFactory] += numToBuy;
                 unmannedSlots += numToBuy;
