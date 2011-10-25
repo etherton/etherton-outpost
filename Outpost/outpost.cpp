@@ -285,23 +285,19 @@ public:
         }
     }
     
-    unsigned computeScaledVictoryPoints() {
+    unsigned computeVictoryPoints() {
         unsigned vps = 0;
         // compute victory points for static upgrades
         for (upgradeEnum_t i=DATA_LIBRARY; i<UPGRADE_COUNT; i++) {
             static const uint8_t vpsForUpgrade[UPGRADE_COUNT] = { 1,1,1,2,2, 3,3,5,5,5, 0,0,0 };
-            unsigned scored = vpsForUpgrade[i] * upgrades[i];
-            vps += scored;
+            vps += vpsForUpgrade[i] * upgrades[i];
         }
         // now include victory points for factories which are manned
         for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++) {
             static const uint8_t vpsForMannedFactory[UPGRADE_COUNT] = { 1,1,2,2,0, 0,3,10,15,20 };
-            unsigned scored = vpsForMannedFactory[i] * (mannedByColonists[i] + mannedByRobots[i]);
-            vps += scored;
+            vps += vpsForMannedFactory[i] * (mannedByColonists[i] + mannedByRobots[i]);
         }
-        // leave room in the 4 lsb's to store the player index
-        // and room in the next 4 lsb's for some random noise for tiebreaking
-        return (vps << 20) + (totalUpgradeCosts<<8);
+        return vps;
     }
     
     void getMaxFactories(vector<uint8_t> &outFactories) {
@@ -409,6 +405,8 @@ public:
     
     money_t getTotalCredits() const { return totalCredits; }
     
+    money_t getTotalUpgradeCosts() const { return totalUpgradeCosts; }
+    
     void dump() {
         cout << "player " << brain->getName() << ", " << int(colonists) << "/" << int(colonistLimit) << " colonists, " << int(productionSize) << "/" << int(productionLimit) << " cards\n\tfactories: ";
         for (int i=ORE; i<PRODUCTION_COUNT; i++)
@@ -430,10 +428,19 @@ class game_t {
     vector<uint8_t> currentMarketCounts;
     vector<player_t> players;
     typedef vector<player_t>::iterator playerIt_t;
-    vector<uint8_t> playerOrder;
-    typedef vector<uint8_t>::iterator playerOrderIt_t;
+    struct playerPos_t {
+        bool operator<(const playerPos_t &that) const {
+            return vps > that.vps || (vps == that.vps && (totalUpgradeCosts > that.totalUpgradeCosts || 
+                                                          (totalUpgradeCosts == that.totalUpgradeCosts && randomNoise > that.randomNoise)));
+        }
+        unsigned vps;
+        money_t totalUpgradeCosts;
+        unsigned randomNoise;
+        playerIndex_t selfIndex;
+    };
+    vector<playerPos_t> playerOrder;
+    typedef vector<playerPos_t>::iterator playerOrderIt_t;
     uint8_t era, marketLimit;
-    uint8_t highestVp;
     bool previousMarketEmpty;
 public:
     game_t(playerIndex_t playerCount) {
@@ -441,7 +448,6 @@ public:
         players.resize(playerCount);
 
         era = 1;
-        highestVp = 3;
         previousMarketEmpty = false;
         upgradeMarket.clear();
         currentMarketCounts.clear();
@@ -513,11 +519,8 @@ public:
             i->drawProductionCards(bank,true);
         
         // randomly assign player order on first turn
-        playerOrder.clear();
-        playerOrder.resize(playerCount);
-        for (int i=0; i<playerOrder.size(); i++)
-            playerOrder[i] = i;
-        random_shuffle(playerOrder.begin(), playerOrder.end());
+        // (the random noise will be sole deciding factor)
+        computeVictoryPoints();
     }
 
 
@@ -533,28 +536,21 @@ public:
         brain.setPlayer(players[index]);
         // players[index].dump();
     }
-    
-    void determinePlayerOrder() {
-        // player order is determined by number of victory points
-        // ties are broken by total cost of purchased upgrades (and special factories)
-        // beyond that, ties are broken randomly by assigning some random bits to the LSB's
-        // and finally beyond that, ties are broken by ordinal value
-        vector<unsigned> playerVps;
-        for (playerIndex_t i=0; i<players.size(); i++)
-            playerVps.push_back(players[i].computeScaledVictoryPoints() | (rand() & 0xF0) | uint8_t(i));
-        // sort in ascending order (default uses operator<)
-        sort(playerVps.begin(),playerVps.end());
+  
+   
+    void computeVictoryPoints() {
         playerOrder.clear();
-        // and reverse the result to determine player order
-        while (playerVps.size()) {
-            playerOrder.push_back(playerVps.back() & 0xF);
-            playerVps.pop_back();
+        for (playerIndex_t i=0; i<players.size(); i++) {
+            playerPos_t p = { players[i].computeVictoryPoints(), players[i].getTotalUpgradeCosts(), rand(), i };
+            playerOrder.push_back(p);
         }
+        // sort in ascending order (default uses operator<)
+        sort(playerOrder.begin(),playerOrder.end());
     }
     
     void displayPlayerOrder() {
         for (playerIndex_t i=0; i<playerOrder.size(); i++)
-            cout << players[playerOrder[i]].getName() << " is Player " << i+1 << " this round (" << (players[playerOrder[i]].computeScaledVictoryPoints() >> 20) << " VPs).\n";
+            cout << players[playerOrder[i].selfIndex].getName() << " is Player " << i+1 << " this round (" << playerOrder[i].vps << " VPs).\n";
     }
 
     void replaceUpgradeCards() {
@@ -566,10 +562,14 @@ public:
         static const uint8_t minVpsForEra3[] = { 0,0,40,35,40,30,35,40,30,35 };
 
         // figure out which era we're in now.
-        if (era == 1 && (highestVp >= 10 || (marketEmpty && previousMarketEmpty)))
+        if (era == 1 && (playerOrder[0].vps >= 10 || (marketEmpty && previousMarketEmpty))) {
+            cout << "*** Entering era 2!\n";
             era = 2;
-        else if (era == 2 && (highestVp >= minVpsForEra3[players.size()] || (marketEmpty && previousMarketEmpty)))
+        }
+        else if (era == 2 && (playerOrder[0].vps >= minVpsForEra3[players.size()] || (marketEmpty && previousMarketEmpty))) {
+            cout << "*** Entering era 3!\n";
             era = 3;
+        }
         previousMarketEmpty = marketEmpty;
         
         while (upgradeMarket.size() < players.size()) {
@@ -605,13 +605,13 @@ public:
 
     void drawProductionCards() {
         for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
-            players[*i].drawProductionCards(bank,false);
+            players[i->selfIndex].drawProductionCards(bank,false);
         }
     }
 
     void discardExcessProductionCards() {
         for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
-            players[*i].discardExcessProductionCards(bank);
+            players[i->selfIndex].discardExcessProductionCards(bank);
         }
     }
 
@@ -659,34 +659,20 @@ public:
 
     void performPlayerTurns(bool firstTurn) {
         for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
-            auctionUpgradeCards(*i);
-            players[*i].purchaseFactories(firstTurn,bank);
-            players[*i].purchaseAndAssignPersonnel(bank);
+            auctionUpgradeCards(i->selfIndex);
+            players[i->selfIndex].purchaseFactories(firstTurn,bank);
+            players[i->selfIndex].purchaseAndAssignPersonnel(bank);
         }        
     }
 
     bool checkVictoryConditions() {
-        playerIndex_t winnerIndex = 0;
-        unsigned winnerScore = 0;
-        highestVp = 0;
-        for (playerIndex_t i=0; i<players.size(); i++) {
-            unsigned vps = players[i].computeScaledVictoryPoints();
-            if ((vps >> 20) > highestVp)
-                highestVp = (vps >> 20);    // for tracking market replenishment era
-            if (vps >= (75 << 20)) {
-                if (vps > winnerScore) {
-                    winnerIndex = i;
-                    winnerScore = vps;
-                }
-            }
-        }
-        if (winnerScore == 0)
-            return false;   // nobody reached 75 points yet
-        cout << "With a winning score of " << (winnerScore >> 20) << " and " << ((winnerScore >> 8) & 0xFFF) << " tiebreaking points:\n";
-        // there may be multiple tying players.
-        for (playerIndex_t i=0; i<players.size(); i++) {
-            if (players[i].computeScaledVictoryPoints() == winnerScore)
-                cout << players[i].getName() << " wins!\n";
+        computeVictoryPoints();
+        if (playerOrder.front().vps < 75)
+            return false;
+        
+        cout << "Game over, final rankings:\n";
+        for (playerIndex_t i=0; i<playerOrder.size(); i++) {
+            cout << "#" << i+1 <<". " << players[playerOrder[i].selfIndex].getName() << ", with " << playerOrder[i].vps << " and " << playerOrder[i].totalUpgradeCosts << " upgrade value.\n";
         }        
         return true;
     }
@@ -832,7 +818,7 @@ public:
                 return 0;
             else if (newBid <= bid)
                 cout << "The bid must either be 0 to pass or something at least " << bid+1 << ".  Your bid? (0 to pass) ";
-            else if (newBid > player->getTotalCredits() - discount)
+            else if (newBid > player->getTotalCredits() + discount)
                 cout << "You only have " << player->getTotalCredits() << " (with a discount of " << discount << ") and cannot afford that bid.  Your bid? (0 to pass) ";
             else
                 return newBid;
@@ -840,7 +826,15 @@ public:
     }
     money_t payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minimumResearchCards) {
         money_t paid = 0;
-        while (paid < cost || minimumResearchCards) {
+        
+        // if our total money minus our cheapest card is not enough to pay, toss everything
+        // note that all other prerequisites would have been met before we got here.
+        if (player->getTotalCredits() - hand[0].value < cost) {
+            paid = player->getTotalCredits();
+            while (hand.size())
+                player->discardCard(bank,0);
+        }
+        else while (paid < cost || minimumResearchCards) {
             if (cost >= 0) {
                 cout << name << ", you need to discard " << cost << " credits worth of cards";
                 if (minimumResearchCards)
@@ -1003,10 +997,11 @@ int main() {
     // do the first turn of the game (several phases are skipped, victory is impossible and so is an era change
     game.displayPlayerOrder();
     game.performPlayerTurns(true);
+    amt_t round = 1;
     
     // now enter the normal turn progression
     do {
-        game.determinePlayerOrder();
+        cout << "\n\n    R O U N D   " << ++round << "\n";
         game.displayPlayerOrder();
         game.replaceUpgradeCards();
         game.drawProductionCards();
