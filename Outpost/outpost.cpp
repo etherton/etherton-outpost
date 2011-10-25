@@ -1,5 +1,13 @@
+/*
+    Implementation of James Hlavaty's 1991 board game "Outpost"
+    Based on rules as published in Stronghold Games edition.
+
+    Commercial use prohibited.  If you like the game, buy a copy of it from www.strongholdgames.com!
+ 
+    Source code Copyright 2011, David C. Etherton.  All Rights Reserved.
+*/
+
 #include <ctype.h>
-#include <stdint.h>
 #include <stdlib.h>
 
 #include <iostream>
@@ -7,6 +15,8 @@
 #include <algorithm>
 
 using namespace std;
+
+typedef unsigned char byte_t;
 
 enum productionEnum_t { ORE, WATER, TITANIUM, RESEARCH, MICROBIOTICS, NEW_CHEMICALS, ORBITAL_MEDICINE, RING_ORE, MOON_ORE, PRODUCTION_COUNT };
 
@@ -33,7 +43,7 @@ const char *upgradeNames[UPGRADE_COUNT] = { "DataLibrary", "Warehouse", "HeavyEq
     "Laboratory", "Ecoplants", "Outpost", "SpaceStation", "PlanetaryCruiser", "MoonBase" };
 
 
-const uint8_t upgradeCosts[UPGRADE_COUNT] = { 15,25,30,25,40, 50,50,80,30,100, 120,160,200 };
+const byte_t upgradeCosts[UPGRADE_COUNT] = { 15,25,30,25,40, 50,50,80,30,100, 120,160,200 };
 
 #define NELEM(x)    (sizeof(x)/sizeof(x[0]))
 
@@ -42,9 +52,8 @@ inline int d4() { return rand() % 4; }
 inline int d10() { return rand() % 10; }
 inline int d12() { return rand() % 12; }
 
-
 struct card_t {
-    uint8_t value,          // biggest card in game is 88, so 7 bits would be enough.
+    byte_t value,          // biggest card in game is 88, so 7 bits would be enough.
         prodType:4,         // productionEnum_t
         handSize:3,         // 0 for Research and Microbiotics.  4 for mega water, titanium, or new chem.  1 otherwise.
         returnToDiscard:1;  // 1 if it goes to discard pile, 0 if "proxy" card or mega
@@ -59,21 +68,21 @@ typedef unsigned amt_t;
 typedef int money_t;
 
 struct cardDistribution_t {
-    uint8_t value, count;
+    byte_t value, count;
 };
 
 class productionDeck_t {
     string name;
-    vector<uint8_t> deck;
-    typedef vector<uint8_t>::iterator deckIt_t;
-    vector<uint8_t> discards;
-    typedef vector<uint8_t>::iterator discardsIt_t;
-    uint8_t prodType;
-    uint8_t average;
-    uint8_t megaSize;
-    uint8_t countsInHandSize;
+    vector<byte_t> deck;
+    typedef vector<byte_t>::iterator deckIt_t;
+    vector<byte_t> discards;
+    typedef vector<byte_t>::iterator discardsIt_t;
+    byte_t prodType;
+    byte_t average;
+    byte_t megaSize;
+    byte_t countsInHandSize;
 public:
-    void init(productionEnum_t n,const cardDistribution_t *dist,size_t count,uint8_t avg,uint8_t mega,uint8_t isBig) {
+    void init(productionEnum_t n,const cardDistribution_t *dist,size_t count,byte_t avg,byte_t mega,byte_t isBig) {
         deck.clear();
         for (size_t i=0; i<count; i++) {
             for (int j=0; j<dist[i].count; j++)
@@ -90,7 +99,7 @@ public:
         random_shuffle(deck.begin(), deck.end());
     }
 
-    uint8_t getMegaValue() const {
+    byte_t getMegaValue() const {
         return megaSize;
     }
 
@@ -120,7 +129,7 @@ public:
         return newCard;
     }
     
-    void discardCard(uint8_t value) {
+    void discardCard(byte_t value) {
         discards.push_back(value);
     }
 
@@ -152,21 +161,21 @@ public:
     virtual cardIndex_t pickCardToAuction(vector<card_t> &hand,vector<upgradeEnum_t> &upgradeMarket,money_t &bid) = 0;
     virtual money_t raiseOrPass(vector<card_t> &hand,upgradeEnum_t upgrade,money_t bid) = 0;
     virtual money_t payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minimumResearchCards) = 0; // returns actual amount paid which may be higher
-    virtual amt_t purchaseFactories(const vector<uint8_t> &maxByType,productionEnum_t &whichFactory) = 0;
+    virtual amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) = 0;
     virtual amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) = 0;
     virtual amt_t purchaseRobots(money_t perRobot,amt_t maxAllowed,amt_t maxUsable) = 0;
-    virtual void assignPersonnel(vector<uint8_t> &factories,vector<uint8_t> &mannedByColonists,vector<uint8_t> &mannedByRobots,amt_t robotLimit) = 0;
+    virtual void assignPersonnel(vector<byte_t> &factories,vector<byte_t> &mannedByColonists,vector<byte_t> &mannedByRobots,amt_t robotLimit) = 0;
 };
 
 class player_t {
     vector<card_t> hand;
     typedef vector<card_t>::iterator cardIt_t;
-    uint8_t colonists, colonistLimit, extraColonistLimit, robots, productionSize, productionLimit, unmannedSlots;
+    byte_t colonists, colonistLimit, extraColonistLimit, robots, productionSize, productionLimit, unmannedSlots;
     money_t totalCredits, totalUpgradeCosts;
-    vector<uint8_t> factories;
-    vector<uint8_t> mannedByColonists;
-    vector<uint8_t> mannedByRobots;
-    vector<uint8_t> upgrades;
+    vector<byte_t> factories;
+    vector<byte_t> mannedByColonists;
+    vector<byte_t> mannedByRobots;
+    vector<byte_t> upgrades;
     brain_t *brain;
 public:
     player_t() {
@@ -289,18 +298,18 @@ public:
         unsigned vps = 0;
         // compute victory points for static upgrades
         for (upgradeEnum_t i=DATA_LIBRARY; i<UPGRADE_COUNT; i++) {
-            static const uint8_t vpsForUpgrade[UPGRADE_COUNT] = { 1,1,1,2,2, 3,3,5,5,5, 0,0,0 };
+            static const byte_t vpsForUpgrade[UPGRADE_COUNT] = { 1,1,1,2,2, 3,3,5,5,5, 0,0,0 };
             vps += vpsForUpgrade[i] * upgrades[i];
         }
         // now include victory points for factories which are manned
         for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++) {
-            static const uint8_t vpsForMannedFactory[UPGRADE_COUNT] = { 1,1,2,2,0, 0,3,10,15,20 };
+            static const byte_t vpsForMannedFactory[UPGRADE_COUNT] = { 1,1,2,2,0, 0,3,10,15,20 };
             vps += vpsForMannedFactory[i] * (mannedByColonists[i] + mannedByRobots[i]);
         }
         return vps;
     }
     
-    void getMaxFactories(vector<uint8_t> &outFactories) {
+    void getMaxFactories(vector<byte_t> &outFactories) {
         outFactories.clear();
         outFactories.resize(PRODUCTION_COUNT);
         outFactories[ORE] = totalCredits / 10;
@@ -335,7 +344,7 @@ public:
 
     void purchaseFactories(bool firstTurn,bank_t &bank) {
         for (;;) {
-            vector<uint8_t> forPurchase;
+            vector<byte_t> forPurchase;
             getMaxFactories(forPurchase);
             productionEnum_t whichFactory;
             // special case - can always afford a water factory
@@ -350,7 +359,7 @@ public:
             // ... ask which factory we want to purchase, and how many ...
             amt_t numToBuy = brain->purchaseFactories(forPurchase,whichFactory);
             if (numToBuy) {
-                static const uint8_t factoryCost[] = { 10,20,30,30,0,60,0,0,0 };
+                static const byte_t factoryCost[] = { 10,20,30,30,0,60,0,0,0 };
                 // if it's the first turn water special case, pay what we have instead of its actual cost.
                 brain->payFor(firstTurn&&whichFactory==WATER? totalCredits : numToBuy * factoryCost[whichFactory],hand,bank,whichFactory==NEW_CHEMICALS? numToBuy : 0);
                 factories[whichFactory] += numToBuy;
@@ -423,9 +432,9 @@ public:
 
 class game_t {
     vector<productionDeck_t> bank;
-    vector<uint8_t> upgradeDrawPiles;
+    vector<byte_t> upgradeDrawPiles;
     vector<upgradeEnum_t> upgradeMarket;
-    vector<uint8_t> currentMarketCounts;
+    vector<byte_t> currentMarketCounts;
     vector<player_t> players;
     typedef vector<player_t>::iterator playerIt_t;
     struct playerPos_t {
@@ -440,7 +449,7 @@ class game_t {
     };
     vector<playerPos_t> playerOrder;
     typedef vector<playerPos_t>::iterator playerOrderIt_t;
-    uint8_t era, marketLimit;
+    byte_t era, marketLimit;
     bool previousMarketEmpty;
 public:
     game_t(playerIndex_t playerCount) {
@@ -503,8 +512,8 @@ public:
             }
         }
         else {
-            static const uint8_t upgrades_1_10[10] = { 0,0,0, 2,3,3,4,5,5,6 };
-            static const uint8_t upgrades_11_13[10] = { 0,0,0, 2,3,4,4,5,6,6 };
+            static const byte_t upgrades_1_10[10] = { 0,0,0, 2,3,3,4,5,5,6 };
+            static const byte_t upgrades_11_13[10] = { 0,0,0, 2,3,4,4,5,6,6 };
             for (upgradeEnum_t i=DATA_LIBRARY; i<SPACE_STATION; i++)
                 upgradeDrawPiles.push_back(upgrades_1_10[playerCount]);
             for (upgradeEnum_t i=SPACE_STATION; i<UPGRADE_COUNT; i++)
@@ -559,7 +568,7 @@ public:
         for (upgradeEnum_t i=DATA_LIBRARY; i<(era==1?SCIENTISTS:SPACE_STATION) && marketEmpty; i++)
             if (upgradeDrawPiles[i])
                 marketEmpty = false;
-        static const uint8_t minVpsForEra3[] = { 0,0,40,35,40,30,35,40,30,35 };
+        static const byte_t minVpsForEra3[] = { 0,0,40,35,40,30,35,40,30,35 };
 
         // figure out which era we're in now.
         if (era == 1 && (playerOrder[0].vps >= 10 || (marketEmpty && previousMarketEmpty))) {
@@ -718,7 +727,7 @@ public:
     money_t payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minResearchCards) {
         return 0;
     }
-    amt_t purchaseFactories(const vector<uint8_t> &maxByType,productionEnum_t &whichFactory) {
+    amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) {
         return 0;
     }
     amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) {
@@ -732,7 +741,7 @@ public:
         // buy as many robots as we can afford
         return 0;
     }
-    void assignPersonnel(vector<uint8_t> &factories,vector<uint8_t> &mannedByColonists,vector<uint8_t> &mannedByRobots,amt_t robotLimit) {
+    void assignPersonnel(vector<byte_t> &factories,vector<byte_t> &mannedByColonists,vector<byte_t> &mannedByRobots,amt_t robotLimit) {
     }
 };
 
@@ -830,6 +839,7 @@ public:
         // if our total money minus our cheapest card is not enough to pay, toss everything
         // note that all other prerequisites would have been met before we got here.
         if (player->getTotalCredits() - hand[0].value < cost) {
+            cout << name << ", that cost all of your poduction cards.\n";
             paid = player->getTotalCredits();
             while (hand.size())
                 player->discardCard(bank,0);
@@ -856,7 +866,7 @@ public:
         }
         return paid;
     }
-    amt_t purchaseFactories(const vector<uint8_t> &maxByType,productionEnum_t &whichFactory) {
+    amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) {
         cout << name << ", which factory would you like to purchase?\n";
         for (productionEnum_t i=ORE; i<=NEW_CHEMICALS; i++)
             if (maxByType[i])
@@ -891,7 +901,7 @@ public:
                 cout << amt << " is more than allowed.\n";
         }
     }
-    void assignPersonnel(vector<uint8_t> &factories,vector<uint8_t> &mannedByColonists,vector<uint8_t> &mannedByRobots,amt_t robotLimit) {
+    void assignPersonnel(vector<byte_t> &factories,vector<byte_t> &mannedByColonists,vector<byte_t> &mannedByRobots,amt_t robotLimit) {
         for (;;) {
             cout << name << ", here are your current allocations:\n";
             amt_t robotsInUse = 0;
@@ -905,7 +915,7 @@ public:
             char cmd = readLetter();
             if (cmd != 'C' && cmd != 'R')
                 return;
-            vector<uint8_t> &manned = (cmd == 'C')? mannedByColonists : mannedByRobots;
+            vector<byte_t> &manned = (cmd == 'C')? mannedByColonists : mannedByRobots;
             cout << "Transfer source? ";
             productionEnum_t src = (productionEnum_t)readUnsigned();
             if (src > PRODUCTION_COUNT || !manned[src]) {
