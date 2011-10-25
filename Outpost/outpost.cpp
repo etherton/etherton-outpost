@@ -736,7 +736,7 @@ public:
         // Note that we could end up discarding a research card we needed to buy research factory!
         return 0;
     }
-    cardIndex_t pickCardToAuction(vector<card_t> &hand,vector<upgradeEnum_t> &upgradeMarket,int &bid) {
+    cardIndex_t pickCardToAuction(vector<card_t> &hand,vector<upgradeEnum_t> &upgradeMarket,money_t &bid) {
         // figure out which things we can actually afford.
         vector<byte_t> order;
         for (unsigned i=0; i<upgradeMarket.size(); i++) {
@@ -744,10 +744,12 @@ public:
             if (player->getTotalCredits() + player->computeDiscount(upgrade) >= upgradeCosts[upgrade])
                 order.push_back(i);
         }
-        order.push_back(upgradeMarket.size());
-        // pick something we can afford, but there's always a chance we'll punt instead.
-        // also, we may crap out on the opening bid.
-        return order[rand() % order.size()];
+        if (!order.size())
+            return upgradeMarket.size();
+        cardIndex_t which = order[rand() % order.size()];
+        money_t openingBid;
+        openingBid = raiseOrPass(hand,upgradeMarket[which],upgradeCosts[upgradeMarket[which]]-1);
+        return openingBid? which : upgradeMarket.size();
     }
     money_t raiseOrPass(vector<card_t> &hand,upgradeEnum_t upgrade,money_t bid) {
         // if we can't afford a higher bid, bail out now.
@@ -763,7 +765,10 @@ public:
         // the amount we need to pay for is lowered by the discount, and the actual resulting bid is
         // increased by the same discount.
         amt_t discount = player->computeDiscount(upgrade);
-        return payForCommon(bid+1 - discount,hand,0,0) + discount;
+        if (discount >= bid+1)
+            return discount;
+        else
+            return payForCommon(bid+1 - discount,hand,0,0) + discount;
     }
     money_t payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minResearchCards) {
         return payForCommon(cost,hand,&bank,minResearchCards);
@@ -816,6 +821,7 @@ public:
                 best >>= 1;
             }
         }
+        cout << name << ": " << bestValue << " was best we could find.\n";
         return bestValue;
     }
     amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) {
