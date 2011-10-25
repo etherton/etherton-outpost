@@ -309,7 +309,7 @@ public:
         }
         // now include victory points for factories which are manned
         for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++) {
-            static const byte_t vpsForMannedFactory[UPGRADE_COUNT] = { 1,1,2,2,0, 0,3,10,15,20 };
+            static const byte_t vpsForMannedFactory[PRODUCTION_COUNT] = { 1,1,2,2,3,3,10,15,20 };
             vps += vpsForMannedFactory[i] * (mannedByColonists[i] + mannedByRobots[i]);
         }
         return vps;
@@ -368,6 +368,7 @@ public:
                 static const byte_t factoryCost[] = { 10,20,30,30,0,60,0,0,0 };
                 // if it's the first turn water special case, pay what we have instead of its actual cost.
                 brain->payFor(firstTurn&&whichFactory==WATER? totalCredits : numToBuy * factoryCost[whichFactory],hand,bank,whichFactory==NEW_CHEMICALS? numToBuy : 0);
+                cout << getName() << " bought " << numToBuy << " " << factoryNames[whichFactory] << " factor" << (numToBuy>1?"ies":"y") << ".\n";
                 factories[whichFactory] += numToBuy;
                 unmannedSlots += numToBuy;
                 // when we cycle up again there will be no special case.
@@ -385,6 +386,7 @@ public:
                 limit = totalCredits / price;
             amt_t purchased = limit? brain->purchaseColonists(price,limit) : 0;
             if (purchased) {
+                cout << getName() << " bought " << purchased << " colonist" << (purchased>1?"s":"") << ".\n";
                 colonists += purchased;
                 mannedByColonists[PRODUCTION_COUNT] += purchased;
                 payFor(purchased * price,bank,0);
@@ -397,6 +399,7 @@ public:
             amt_t limit = totalCredits / price;
             amt_t purchased = limit? brain->purchaseRobots(price,limit,(upgrades[ROBOTICS] * (colonistLimit + extraColonistLimit)) - robots) : 0;
             if (purchased) {
+                cout << getName() << " bought " << purchased << " robot" << (purchased>1?"s":"") << ".\n";
                 robots += purchased;
                 mannedByRobots[PRODUCTION_COUNT] += purchased;
                 payFor(purchased * price,bank,0);
@@ -407,16 +410,18 @@ public:
     
     void displayHoldings() {
         if (totalUpgradeCosts) {
+            int nonzero = 0;
             cout << getName() << "'s upgrades: ";
             for (upgradeEnum_t i=DATA_LIBRARY; i<UPGRADE_COUNT; i++)
                 if (upgrades[i])
-                    cout << int(upgrades[i]) << "/" << upgradeNames[i] << "; ";
+                    cout << int(upgrades[i]) << "/" << upgradeNames[i] << (++nonzero==6?";\n\t" : "; ");
             cout << endl;
         }
         cout << getName() << "'s factories: ";
+        int nonzero = 0;
         for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++)
             if (factories[i])
-                cout << int(factories[i]) << "/" << factoryNames[i] << "(" << int(mannedByColonists[i]) << "+" << int(mannedByRobots[i]) << "); ";
+                cout << int(factories[i]) << "/" << factoryNames[i] << "(" << int(mannedByColonists[i]) << "+" << int(mannedByRobots[i]) << ");" << (++nonzero==6?"\n\t":" ");
         cout << "Unused(" << int(mannedByColonists[PRODUCTION_COUNT]) << "+" << int(mannedByRobots[PRODUCTION_COUNT]) << ");\n";
     }
     
@@ -843,11 +848,6 @@ public:
         if (d4() + player->upgrades[upgrade] > 2)
             return 0;
         vector<card_t> handCopy(hand);
-        bank_t emptyBank;
-        // attempt to pay for the next possible bid, see what it actually cost, and bid that amount.
-        // we do all this with a copy of our production hand and a dummy bank so nothing is really discarded yet.
-        // the amount we need to pay for is lowered by the discount, and the actual resulting bid is
-        // increased by the same discount.
         amt_t discount = player->computeDiscount(upgrade);
         if (discount >= bid+1)
             return discount;
@@ -862,12 +862,12 @@ public:
                 whichFactory = i;
                 amt_t want = (maxByType[i] + 1) / 2;
                 if (!mostToBuy) {
-                    // if we have no colonists remaining, we might still buy something if a crappy factory
-                    // has people we can borrow
-                    if (i == WATER && player->mannedByColonists[ORE])
-                        want = 1;
-                    else if (player->mannedByColonists[ORE] || player->mannedByColonists[WATER])
-                        want = 1;
+                    // if we have no colonists remaining, we might still buy something if there are any operators available
+                    // in cheaper factories.
+                    want = 0;
+                    for (productionEnum_t j=productionEnum_t(i-1); j>=ORE && !want; j--)
+                        if (player->mannedByColonists[j] + player->mannedByRobots[j])
+                            want = 1;
                 }
                 else if (want > mostToBuy)
                     want = mostToBuy;
