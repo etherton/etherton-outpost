@@ -661,13 +661,16 @@ public:
     void auctionUpgradeCards(playerIndex_t selfIndex) {
         cardIndex_t nextAuction;
         money_t bid;
-        cout << "There are " << upgradeMarket.size() << " cards available for auction.\n";
+        if (upgradeMarket.size() == 1)
+            cout << "There is 1 card available for auction.\n";
+        else
+            cout << "There are " << upgradeMarket.size() << " cards available for auction.\n";
         while (upgradeMarket.size() && (nextAuction = players[selfIndex].pickCardToAuction(upgradeMarket,bid)) != upgradeMarket.size()) {
             // remove the card from the market
             upgradeEnum_t upgrade = upgradeMarket[nextAuction];
             upgradeMarket.erase(upgradeMarket.begin() + nextAuction);
             currentMarketCounts[upgrade]--;
-            cout << players[selfIndex].getName() << " places a " << upgradeNames[upgrade] << " up for auction with an opening bid of " << bid << ".\n";
+            cout << players[selfIndex].getName() << " places " << upgradeNames[upgrade] << " up for auction with an opening bid of " << bid << ".\n";
             
             // run the auction until everybody else passes.
             unsigned numPassedInARow = 0;
@@ -691,7 +694,7 @@ public:
                     cout << players[nextBidder].getName() << " passes.\n";
             }
             
-            cout << players[highBidder].getName() << " wins the auction for a " << upgradeNames[upgrade] << " with " << bid << " credits.\n";
+            cout << players[highBidder].getName() << " wins the auction for " << upgradeNames[upgrade] << " with " << bid << " credits.\n";
             money_t discount = players[highBidder].computeDiscount(upgrade);
             if (bid > discount)
                 players[highBidder].payFor(bid - discount,bank,0);
@@ -756,7 +759,7 @@ money_t brain_t::payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t min
     cardIndex_t base = 0;
     while (best) {
         if (best & 1) {
-            cout << name << " discards an " << factoryNames[hand[base].prodType] << "/" << int(hand[base].value) << ".\n";
+            cout << name << " discards " << factoryNames[hand[base].prodType] << "/" << int(hand[base].value) << ".\n";
             player->discardCard(bank, base);
         }
         else
@@ -778,25 +781,26 @@ money_t brain_t::findBestCards(money_t cost,vector<card_t> &hand,amt_t minResear
     if (bestValue > cost) {
         for (unsigned i=1; i<handMax; i++) {
             unsigned test = i;
-            amt_t testValue = 0;
+            amt_t testValue = 0, testResearchCount = 0;
             size_t testCards = 0;
             // determine the value of this permutation, and remember how many cards there were.
             for (unsigned j=0; j<width; j++,test>>=1) {
                 if (test & 1) {
                     testValue += hand[j].value;
+                    testResearchCount += hand[j].prodType == RESEARCH;
                     ++testCards;
                 }
             }
             // if we got an exact match, we can stop looking
             // since cards are sorted by increasing value we will get rid of as many cards as possible
-            if (testValue == cost) {
+            if (testValue == cost && testResearchCount >= minResearchCards) {
                 best = i;
                 bestValue = testValue;
                 break;
             }
             // if this is better than our previous best guess, remember it.
             // but factor in the number of cards so that we favor burning more cards.
-            else if (testValue > cost && testValue - testCards < bestValue - bestCards) {
+            else if (testValue > cost && testValue - testCards < bestValue - bestCards && testResearchCount > minResearchCards) {
                 best = i;
                 bestValue = testValue;
             }
@@ -1085,6 +1089,10 @@ public:
             }
             else if (dst != PRODUCTION_COUNT && src == PRODUCTION_COUNT && cmd == 'R' && robotsInUse + xferAmt > robotLimit) {
                 cout << "Sorry, that would place you over your robot limit of " << robotLimit << ".\n";
+                continue;
+            }
+            else if (dst >= ORBITAL_MEDICINE && dst <= MOON_ORE && cmd == 'R') {
+                cout << "Sorry, you cannot staff robots at those Special Factories.\n";
                 continue;
             }
             // otherwise, perform the transfer
