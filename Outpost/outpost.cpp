@@ -157,6 +157,22 @@ public:
     const string& getName() const { return name; }
     void setPlayer(player_t &p) { player = &p; }
 
+    void displayProductionCards(vector<card_t> &hand,size_t annotateMask = 0) {
+        for (cardIndex_t i=0; i<hand.size(); i++,annotateMask>>=1)
+            cout << i << ". " << factoryNames[hand[i].prodType] << "/" << int(hand[i].value) << (annotateMask&1?" ***":"") << endl;
+    }
+
+    void displayProductionCardsOnSingleLine(vector<card_t> &hand) {
+        if (hand.size()) {
+            cout << "[ ";
+            for (cardIndex_t i=0; i<hand.size(); i++)
+                cout << factoryNames[hand[i].prodType] << "/" << int(hand[i].value) << " ";
+            cout << "]\n";
+        }
+        else
+            cout << "[ ** no production cards ** ]\n";
+    }
+
     virtual bool wantMega(productionEnum_t) = 0;
     virtual cardIndex_t pickDiscard(vector<card_t> &hand) = 0;
     virtual cardIndex_t pickCardToAuction(vector<card_t> &hand,vector<upgradeEnum_t> &upgradeMarket,money_t &bid) = 0;
@@ -689,10 +705,11 @@ public:
                     cout << players[highBidder].getName() << " raises the bid to " << bid << ".\n";
                 }
                 // everybody else has passed?
-                else if (++numPassedInARow == players.size()-1)
-                    break;
-                else
+                else {
                     cout << players[nextBidder].getName() << " passes.\n";
+                    if (++numPassedInARow == players.size()-1)
+                        break;
+                }
             }
             
             cout << players[highBidder].getName() << " wins the auction for " << upgradeNames[upgrade] << " with " << bid << " credits.\n";
@@ -756,6 +773,12 @@ void brain_t::assignPersonnel(vector<byte_t> &factories,vector<byte_t> &mannedBy
 
 money_t brain_t::payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minResearchCards) {
     size_t best;
+    
+    // DEBUG CODE
+    cout << name << " needs to pay at least " << cost << " (of " << player->getTotalCredits() << ") from: ";
+    displayProductionCardsOnSingleLine(hand);
+    // END DEBUG CODE
+    
     money_t paid = findBestCards(cost,hand,minResearchCards,&best);
     cardIndex_t base = 0;
     while (best) {
@@ -777,19 +800,16 @@ money_t brain_t::findBestCards(money_t cost,vector<card_t> &hand,amt_t minResear
     size_t handMax = 1U << width;
     size_t best = handMax - 1;    // best match is the entire hand.
     amt_t bestValue = player->getTotalCredits();  // best value is the entire hand.
-    size_t bestCards = width;
     // don't waste time if it's an exact match
     if (bestValue > cost) {
         for (unsigned i=1; i<handMax; i++) {
             unsigned test = i;
             amt_t testValue = 0, testResearchCount = 0;
-            size_t testCards = 0;
             // determine the value of this permutation, and remember how many cards there were.
             for (unsigned j=0; j<width; j++,test>>=1) {
                 if (test & 1) {
                     testValue += hand[j].value;
                     testResearchCount += hand[j].prodType == RESEARCH;
-                    ++testCards;
                 }
             }
             // if we got an exact match, we can stop looking
@@ -800,8 +820,9 @@ money_t brain_t::findBestCards(money_t cost,vector<card_t> &hand,amt_t minResear
                 break;
             }
             // if this is better than our previous best guess, remember it.
-            // but factor in the number of cards so that we favor burning more cards.
-            else if (testValue > cost && testValue - testCards < bestValue - bestCards && testResearchCount > minResearchCards) {
+            // note that since the deck is sorted by least to most we'll tend to favor ditching more
+            // cheaper cards all other things considered equally
+            else if (testValue > cost && testValue < bestValue && testResearchCount > minResearchCards) {
                 best = i;
                 bestValue = testValue;
             }
@@ -913,20 +934,6 @@ public:
     bool wantMega(productionEnum_t t) {
         cout << name << ", do you want a megaproduction card for " << factoryNames[t] << "? ";
         return readLetter() == 'Y';
-    }
-    void displayProductionCards(vector<card_t> &hand,size_t annotateMask = 0) {
-        for (cardIndex_t i=0; i<hand.size(); i++,annotateMask>>=1)
-            cout << i << ". " << factoryNames[hand[i].prodType] << "/" << int(hand[i].value) << (annotateMask&1?" ***":"") << endl;
-    }
-    void displayProductionCardsOnSingleLine(vector<card_t> &hand) {
-        if (hand.size()) {
-            cout << "[ ";
-            for (cardIndex_t i=0; i<hand.size(); i++)
-                cout << factoryNames[hand[i].prodType] << "/" << int(hand[i].value) << " ";
-            cout << "]\n";
-        }
-        else
-            cout << "[ ** no production cards ** ]\n";
     }
    cardIndex_t pickDiscard(vector<card_t> &hand) {
         cout << name << ", you are over your hand limit.\n";
