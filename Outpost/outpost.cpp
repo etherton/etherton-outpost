@@ -177,6 +177,7 @@ class player_t {
     vector<byte_t> mannedByRobots;
     vector<byte_t> upgrades;
     brain_t *brain;
+    friend class computerBrain_t;
 public:
     player_t() {
         colonists = 3;
@@ -246,7 +247,7 @@ public:
                 cout << getName() << " draws a " << factoryNames[i] << " mega production card.\n";
             }
             if (toDraw)
-                cout << getName() << " draws " << toDraw << " " << factoryNames[i] << " production cards.\n";
+                cout << getName() << " draws " << toDraw << " " << factoryNames[i] << " production card" << (toDraw>1?"s":"") << ".\n";
             while (toDraw) {
                 addCard(bank[i]);
                 --toDraw;
@@ -262,7 +263,7 @@ public:
             ++discarded;    // some cards take four slots
         }
         if (discarded)
-            cout << getName() << " discarded " << discarded << " production cards.\n";
+            cout << getName() << " discarded " << discarded << " production card" << (discarded>1?"s":"") << ".\n";
     }
     
     void newFactoryFromUpgrade(productionEnum_t which) {
@@ -727,23 +728,114 @@ public:
         // this decision is hard -- need to factor in what cards we think are left in the deck,
         // and whether we're making any big purchases this turn, and whether we'd be over our
         // hand limit and have to discard.
-        return false; 
+        // for now, just do it once in a while.
+        return d4() == 0; 
     }
     cardIndex_t pickDiscard(vector<card_t> &hand) {
-        // Just pick the cheapest card we have.
+        // Just pick the cheapest card we have.  (cards are always in sorted order)
+        // Note that we could end up discarding a research card we needed to buy research factory!
         return 0;
     }
     cardIndex_t pickCardToAuction(vector<card_t> &hand,vector<upgradeEnum_t> &upgradeMarket,int &bid) {
-        // for now - never initiates an auction
-        return upgradeMarket.size();
+        // figure out which things we can actually afford.
+        vector<byte_t> order;
+        for (unsigned i=0; i<upgradeMarket.size(); i++) {
+            upgradeEnum_t upgrade = upgradeMarket[i];
+            if (player->getTotalCredits() + player->computeDiscount(upgrade) >= upgradeCosts[upgrade])
+                order.push_back(i);
+        }
+        order.push_back(upgradeMarket.size());
+        // pick something we can afford, but there's always a chance we'll punt instead.
+        // also, we may crap out on the opening bid.
+        return order[rand() % order.size()];
     }
     money_t raiseOrPass(vector<card_t> &hand,upgradeEnum_t upgrade,money_t bid) {
-        return 0;   // never bids
+        // if we can't afford a higher bid, bail out now.
+        if (bid + 1 < player->getTotalCredits())
+            return 0;
+        // random chance we pass anyway, moreso if we already have one or more
+        if (d4() + player->upgrades[upgrade] > 2)
+            return 0;
+        vector<card_t> handCopy(hand);
+        bank_t emptyBank;
+        // attempt to pay for the next possible bid, see what it actually cost, and bid that amount.
+        // we do all this with a copy of our production hand and a dummy bank so nothing is really discarded yet.
+        // the amount we need to pay for is lowered by the discount, and the actual resulting bid is
+        // increased by the same discount.
+        amt_t discount = player->computeDiscount(upgrade);
+        return payForCommon(bid+1 - discount,hand,0,0) + discount;
     }
     money_t payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minResearchCards) {
-        return 0;
+        return payForCommon(cost,hand,&bank,minResearchCards);
+    }
+    money_t payForCommon(money_t cost,vector<card_t> &hand,bank_t *bank,amt_t minResearchCards) {
+        // i doubt a hand size of more than 31 cards is really possible.
+        // note this code could get pretty slow for bigger hands though since it's exhaustive.
+        size_t width = hand.size();
+        size_t handMax = 1U << width;
+        size_t best = handMax - 1;    // best match is the entire hand.
+        amt_t bestValue = player->getTotalCredits();  // best value is the entire hand.
+        size_t bestCards = width;
+        // don't waste time if it's an exact match
+        if (bestValue > cost) {
+            for (unsigned i=1; i<handMax; i++) {
+                unsigned test = i;
+                amt_t testValue = 0;
+                size_t testCards = 0;
+                // determine the value of this permutation, and remember how many cards there were.
+                for (unsigned j=0; j<width; j++,test>>=1) {
+                    if (test & 1) {
+                        testValue += hand[j].value;
+                        ++testCards;
+                    }
+                }
+                // if we got an exact match, we can stop looking
+                // since cards are sorted by increasing value we will get rid of as many cards as possible
+                if (testValue == cost) {
+                    best = i;
+                    bestValue = testValue;
+                    break;
+                }
+                // if this is better than our previous best guess, remember it.
+                // but factor in the number of cards so that we favor burning more cards.
+                else if (testValue > cost && testValue - testCards < bestValue - bestCards) {
+                    best = i;
+                    bestValue = testValue;
+                }
+            }
+        }
+        // once we get here, bestValue is the amount we're paying, and best is which cards we'd pay with.
+        // if there's a real bank, actually discard the cards.
+        if (bank) {
+            cardIndex_t base = 0;
+            while (best) {
+                if (best & 1)
+                    player->discardCard(*bank, base);
+                else
+                    base++;
+                best >>= 1;
+            }
+        }
+        return bestValue;
     }
     amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) {
+        amt_t mostToBuy = player->mannedByColonists[PRODUCTION_COUNT] + player->mannedByRobots[PRODUCTION_COUNT];
+        for (productionEnum_t i=NEW_CHEMICALS; i>ORE; i--)
+            if (maxByType[i]) {
+                whichFactory = i;
+                amt_t want = (maxByType[i] + 1) / 2;
+                if (!mostToBuy) {
+                    // if we have no colonists remaining, we might still buy something if a crappy factory
+                    // has people we can borrow
+                    if (i == WATER && player->mannedByColonists[ORE])
+                        want = 1;
+                    else if (player->mannedByColonists[ORE] || player->mannedByColonists[WATER])
+                        want = 1;
+                }
+                else if (want > mostToBuy)
+                    want = mostToBuy;
+                return want;
+            }
         return 0;
     }
     amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) {
