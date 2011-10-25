@@ -855,6 +855,7 @@ public:
             return findBestCards(bid+1 - discount,hand,0,0) + discount;
     }
     amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) {
+        // need more smarts here... shouldn't keep buying factories that we have no hope of staffing.
         amt_t mostToBuy = player->mannedByColonists[PRODUCTION_COUNT] + player->mannedByRobots[PRODUCTION_COUNT];
         for (productionEnum_t i=NEW_CHEMICALS; i>ORE; i--)
             if (maxByType[i]) {
@@ -879,8 +880,8 @@ public:
         return (player->mannedByColonists[PRODUCTION_COUNT])? 0 : (maxAllowed+1)/2;
     }
     amt_t purchaseRobots(money_t perRobot,amt_t maxAllowed,amt_t maxUsable) {
-        // buy as many robots as we can afford
-        return 0;
+        // don't buy robots if we already have some we haven't used yet.
+        return (player->mannedByRobots[PRODUCTION_COUNT])? 0 : (maxAllowed+1)/2;
     }
 };
 
