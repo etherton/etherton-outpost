@@ -150,6 +150,7 @@ class brain_t {
 protected:
     string name;
     player_t *player;
+    money_t findBestCards(money_t cost,vector<card_t> &hand,amt_t minResearchCards,size_t *bestCardsOut);
 public:
     brain_t(string n) : name(n) { }
     virtual ~brain_t() { }
@@ -160,11 +161,11 @@ public:
     virtual cardIndex_t pickDiscard(vector<card_t> &hand) = 0;
     virtual cardIndex_t pickCardToAuction(vector<card_t> &hand,vector<upgradeEnum_t> &upgradeMarket,money_t &bid) = 0;
     virtual money_t raiseOrPass(vector<card_t> &hand,upgradeEnum_t upgrade,money_t bid) = 0;
-    virtual money_t payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minimumResearchCards) = 0; // returns actual amount paid which may be higher
+    virtual money_t payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minimumResearchCards); // returns actual amount paid which may be higher
     virtual amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) = 0;
     virtual amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) = 0;
     virtual amt_t purchaseRobots(money_t perRobot,amt_t maxAllowed,amt_t maxUsable) = 0;
-    virtual void assignPersonnel(vector<byte_t> &factories,vector<byte_t> &mannedByColonists,vector<byte_t> &mannedByRobots,amt_t robotLimit) = 0;
+    virtual void assignPersonnel(vector<byte_t> &factories,vector<byte_t> &mannedByColonists,vector<byte_t> &mannedByRobots,amt_t robotLimit);
 };
 
 class player_t {
@@ -268,8 +269,8 @@ public:
     
     void newFactoryFromUpgrade(productionEnum_t which) {
         factories[which]++;
-        // TODO - ask if we want to immediately staff the factory
-        // this is important if you won a factory after your player turn and want to use it next turn.
+        // call base class to auto-assign to new factory if appropriate (note this may undo player's changes!)
+        brain->brain_t::assignPersonnel(factories,mannedByColonists,mannedByRobots,upgrades[ROBOTICS] * (colonistLimit + extraColonistLimit));
     }
     
     void addUpgrade(upgradeEnum_t upgrade) {
@@ -719,6 +720,88 @@ public:
     }
 };
 
+void brain_t::assignPersonnel(vector<byte_t> &factories,vector<byte_t> &mannedByColonists,vector<byte_t> &mannedByRobots,amt_t robotLimit) {
+    // everybody outta the pool!
+    for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++) {
+        mannedByColonists[PRODUCTION_COUNT] += mannedByColonists[i];
+        mannedByColonists[i] = 0;
+        mannedByRobots[PRODUCTION_COUNT] += mannedByRobots[i];
+        mannedByRobots[i] = 0;
+    }
+    // assign to factories from the top down, favoring humans first
+    for (productionEnum_t i=MOON_ORE; i>=ORE; i--) {
+        while (mannedByColonists[i] < factories[i] && mannedByColonists[PRODUCTION_COUNT]) {
+            ++mannedByColonists[i];
+            --mannedByColonists[PRODUCTION_COUNT];
+        }
+    }
+    // fill in anything remaining with robots but only up to the limit
+    for (productionEnum_t i=ORBITAL_MEDICINE; i>=ORE && robotLimit; i--) {
+        while (robotLimit && (mannedByColonists[i] + mannedByRobots[i]) < factories[i] && mannedByRobots[PRODUCTION_COUNT]) {
+            ++mannedByRobots[i];
+            --mannedByRobots[PRODUCTION_COUNT];
+            --robotLimit;
+        }
+    }
+}
+
+money_t brain_t::payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minResearchCards) {
+    size_t best;
+    money_t paid = findBestCards(cost,hand,minResearchCards,&best);
+    cardIndex_t base = 0;
+    while (best) {
+        if (best & 1) {
+            cout << name << " discards an " << factoryNames[hand[base].prodType] << "/" << int(hand[base].value) << ".\n";
+            player->discardCard(bank, base);
+        }
+        else
+            base++;
+        best >>= 1;
+    }
+    return paid;
+}
+
+money_t brain_t::findBestCards(money_t cost,vector<card_t> &hand,amt_t minResearchCards,size_t *bestOut) {
+    // i doubt a hand size of more than 31 cards is really possible.
+    // note this code could get pretty slow for bigger hands though since it's exhaustive.
+    size_t width = hand.size();
+    size_t handMax = 1U << width;
+    size_t best = handMax - 1;    // best match is the entire hand.
+    amt_t bestValue = player->getTotalCredits();  // best value is the entire hand.
+    size_t bestCards = width;
+    // don't waste time if it's an exact match
+    if (bestValue > cost) {
+        for (unsigned i=1; i<handMax; i++) {
+            unsigned test = i;
+            amt_t testValue = 0;
+            size_t testCards = 0;
+            // determine the value of this permutation, and remember how many cards there were.
+            for (unsigned j=0; j<width; j++,test>>=1) {
+                if (test & 1) {
+                    testValue += hand[j].value;
+                    ++testCards;
+                }
+            }
+            // if we got an exact match, we can stop looking
+            // since cards are sorted by increasing value we will get rid of as many cards as possible
+            if (testValue == cost) {
+                best = i;
+                bestValue = testValue;
+                break;
+            }
+            // if this is better than our previous best guess, remember it.
+            // but factor in the number of cards so that we favor burning more cards.
+            else if (testValue > cost && testValue - testCards < bestValue - bestCards) {
+                best = i;
+                bestValue = testValue;
+            }
+        }
+    }
+    if (bestOut)
+        *bestOut = best;
+    return bestValue;
+}
+
 
 class computerBrain_t: public brain_t {
     const game_t &game;
@@ -747,9 +830,10 @@ public:
         if (!order.size())
             return upgradeMarket.size();
         cardIndex_t which = order[rand() % order.size()];
-        money_t openingBid;
-        openingBid = raiseOrPass(hand,upgradeMarket[which],upgradeCosts[upgradeMarket[which]]-1);
-        return openingBid? which : upgradeMarket.size();
+        // TODO: if we suspect we know what people can actually afford, we should raise our bid slightly
+        // if we're already near our limit.
+        bid = findBestCards(upgradeCosts[upgradeMarket[which]],hand,0,0);
+        return which;
     }
     money_t raiseOrPass(vector<card_t> &hand,upgradeEnum_t upgrade,money_t bid) {
         // if we can't afford a higher bid, bail out now.
@@ -768,61 +852,7 @@ public:
         if (discount >= bid+1)
             return discount;
         else
-            return payForCommon(bid+1 - discount,hand,0,0) + discount;
-    }
-    money_t payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minResearchCards) {
-        return payForCommon(cost,hand,&bank,minResearchCards);
-    }
-    money_t payForCommon(money_t cost,vector<card_t> &hand,bank_t *bank,amt_t minResearchCards) {
-        // i doubt a hand size of more than 31 cards is really possible.
-        // note this code could get pretty slow for bigger hands though since it's exhaustive.
-        size_t width = hand.size();
-        size_t handMax = 1U << width;
-        size_t best = handMax - 1;    // best match is the entire hand.
-        amt_t bestValue = player->getTotalCredits();  // best value is the entire hand.
-        size_t bestCards = width;
-        // don't waste time if it's an exact match
-        if (bestValue > cost) {
-            for (unsigned i=1; i<handMax; i++) {
-                unsigned test = i;
-                amt_t testValue = 0;
-                size_t testCards = 0;
-                // determine the value of this permutation, and remember how many cards there were.
-                for (unsigned j=0; j<width; j++,test>>=1) {
-                    if (test & 1) {
-                        testValue += hand[j].value;
-                        ++testCards;
-                    }
-                }
-                // if we got an exact match, we can stop looking
-                // since cards are sorted by increasing value we will get rid of as many cards as possible
-                if (testValue == cost) {
-                    best = i;
-                    bestValue = testValue;
-                    break;
-                }
-                // if this is better than our previous best guess, remember it.
-                // but factor in the number of cards so that we favor burning more cards.
-                else if (testValue > cost && testValue - testCards < bestValue - bestCards) {
-                    best = i;
-                    bestValue = testValue;
-                }
-            }
-        }
-        // once we get here, bestValue is the amount we're paying, and best is which cards we'd pay with.
-        // if there's a real bank, actually discard the cards.
-        if (bank) {
-            cardIndex_t base = 0;
-            while (best) {
-                if (best & 1)
-                    player->discardCard(*bank, base);
-                else
-                    base++;
-                best >>= 1;
-            }
-        }
-        cout << name << ": " << bestValue << " was best we could find.\n";
-        return bestValue;
+            return findBestCards(bid+1 - discount,hand,0,0) + discount;
     }
     amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) {
         amt_t mostToBuy = player->mannedByColonists[PRODUCTION_COUNT] + player->mannedByRobots[PRODUCTION_COUNT];
@@ -845,17 +875,12 @@ public:
         return 0;
     }
     amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) {
-        // buy as many colonists as we can afford and still house
-        if (perColonist * maxAllowed > player->getTotalCredits())
-            return player->getTotalCredits() / perColonist;
-        else
-            return maxAllowed;
+        // don't buy colonists if we already have some we haven't used yet.
+        return (player->mannedByColonists[PRODUCTION_COUNT])? 0 : (maxAllowed+1)/2;
     }
     amt_t purchaseRobots(money_t perRobot,amt_t maxAllowed,amt_t maxUsable) {
         // buy as many robots as we can afford
         return 0;
-    }
-    void assignPersonnel(vector<byte_t> &factories,vector<byte_t> &mannedByColonists,vector<byte_t> &mannedByRobots,amt_t robotLimit) {
     }
 };
 
@@ -883,9 +908,9 @@ public:
         cout << name << ", do you want a megaproduction card for " << factoryNames[t] << "? ";
         return readLetter() == 'Y';
     }
-    void displayProductionCards(vector<card_t> &hand) {
-        for (cardIndex_t i=0; i<hand.size(); i++)
-            cout << i << ". " << factoryNames[hand[i].prodType] << "/" << int(hand[i].value) << endl;
+    void displayProductionCards(vector<card_t> &hand,size_t annotateMask = 0) {
+        for (cardIndex_t i=0; i<hand.size(); i++,annotateMask>>=1)
+            cout << i << ". " << factoryNames[hand[i].prodType] << "/" << int(hand[i].value) << (annotateMask&1?" ***":"") << endl;
     }
     void displayProductionCardsOnSingleLine(vector<card_t> &hand) {
         if (hand.size()) {
@@ -974,14 +999,20 @@ public:
             }
             else
                 cout << name << ", you still need to discard " << minimumResearchCards << " more research cards!\n";
-            displayProductionCards(hand);
-            cout << "Enter a card, by number, to discard: ";
+            size_t best;
+            findBestCards(cost-paid,hand,minimumResearchCards,&best);
+            displayProductionCards(hand,best);
+            cout << "Enter a card, by number, to discard: (or nothing to pick defaults) ";
             cardIndex_t which = readUnsigned();
             if (which < hand.size()) {
                 cost -= hand[which].value;
                 if (hand[which].prodType == RESEARCH && minimumResearchCards)
                     --minimumResearchCards;
                 player->discardCard(bank,which);
+            }
+            else {
+                paid += brain_t::payFor(cost-paid,hand,bank,minimumResearchCards);
+                break;
             }
         }
         return paid;
@@ -1017,6 +1048,8 @@ public:
             return maxAllowed;
     }
     void assignPersonnel(vector<byte_t> &factories,vector<byte_t> &mannedByColonists,vector<byte_t> &mannedByRobots,amt_t robotLimit) {
+        // automatically assign personnel first
+        brain_t::assignPersonnel(factories,mannedByColonists,mannedByRobots,robotLimit);
         for (;;) {
             cout << name << ", here are your current allocations:\n";
             amt_t robotsInUse = 0;
