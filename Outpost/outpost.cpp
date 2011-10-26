@@ -1023,9 +1023,9 @@ public:
         displayProductionCardsOnSingleLine(hand,best);
         cout << name << ", you have " << player->getTotalCredits() << " and a discount of " << discount << " on this upgrade.\n";
         if (minBid == upgradeCosts[upgrade])
-            cout << name << ", please pick an opening bid for " << upgradeNames[upgrade] << " of at least " << minBid << " or empty line or 0 to pass: (recommend " << recommendedBid << ") ";
+            cout << name << ", please pick an opening bid for " << upgradeNames[upgrade] << " of at least " << minBid << " (you can pay exactly " << recommendedBid << ") or empty line or 0 to pass: ";
         else
-            cout << name << ", the minimum bid for " << upgradeNames[upgrade] << " is now at " << minBid << ", or empty line or 0 to pass: (recommend " << recommendedBid << ") ";
+            cout << name << ", the minimum bid for " << upgradeNames[upgrade] << " is now at " << minBid << " (you can pay exactly " << recommendedBid << "), or empty line or 0 to pass: ";
         for (;;) {
             money_t newBid = readUnsigned();
             if (newBid == 0 || newBid == EMPTY)
