@@ -993,12 +993,12 @@ public:
             for (cardIndex_t i=0; i<upgradeMarket.size(); i++)
                 cout << i << ". " << upgradeNames[upgradeMarket[i]] << " (min bid is " << int(upgradeCosts[upgradeMarket[i]]) << ")\n";
             displayProductionCardsOnSingleLine(hand);
-            cout << name << ", pick a card to auction? (you have " << player->getTotalCredits() << ") ";
+            cout << name << ", pick a card to auction or empty line for none? (you have " << player->getTotalCredits() << ") ";
             for (;;) {
                 cardIndex_t which = readUnsigned();
-                if (which >= upgradeMarket.size())
+                if (which == EMPTY)
                     return upgradeMarket.size();
-                else {
+                else if (which < upgradeMarket.size()) {
                     bid = raiseOrPass(hand,upgradeMarket[which],upgradeCosts[upgradeMarket[which]]);
                     if (!bid) {      // couldn't make valid opening bid, bounce them to selection menu
                         cout << "You cannot afford that.\n";
@@ -1007,6 +1007,8 @@ public:
                     else    // otherwise pass valid selection and bid to caller
                         return which;
                 }
+                else
+                    cout << "That is not a valid choice.  Enter an empty line if you don't wan't to auction anything: ";
             }
         }
     }
@@ -1021,15 +1023,15 @@ public:
         displayProductionCardsOnSingleLine(hand,best);
         cout << name << ", you have " << player->getTotalCredits() << " and a discount of " << discount << " on this upgrade.\n";
         if (minBid == upgradeCosts[upgrade])
-            cout << name << ", please pick an opening bid for " << upgradeNames[upgrade] << " of at least " << minBid << " or empty line to pass: (recommend " << recommendedBid << ") ";
+            cout << name << ", please pick an opening bid for " << upgradeNames[upgrade] << " of at least " << minBid << " or empty line or 0 to pass: (recommend " << recommendedBid << ") ";
         else
-            cout << name << ", the minimum bid for " << upgradeNames[upgrade] << " is now at " << minBid << ", or empty line to pass: (recommend " << recommendedBid << ") ";
+            cout << name << ", the minimum bid for " << upgradeNames[upgrade] << " is now at " << minBid << ", or empty line or 0 to pass: (recommend " << recommendedBid << ") ";
         for (;;) {
             money_t newBid = readUnsigned();
             if (newBid == 0 || newBid == EMPTY)
                 return 0;
             else if (newBid < minBid)
-                cout << "The bid must either be 0 to pass or something at least " << minBid << ".  Your bid? (0 to pass) ";
+                cout << "The bid must either be 0 to pass or something at least " << minBid << ".  Your bid? (default or 0 is pass) ";
             else if (newBid > player->getTotalCredits() + discount)
                 cout << "You only have " << player->getTotalCredits() << " (with a discount of " << discount << ") and cannot afford that bid.  Your bid? (0 to pass) ";
             else
@@ -1076,34 +1078,52 @@ public:
         return paid;
     }
     amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) {
-        cout << name << ", which factory would you like to purchase? (empty line for none)\n";
-        for (int i=ORE; i<=NEW_CHEMICALS; i++)
-            if (maxByType[i])
-                cout << i << ". " << factoryNames[i] << " (at most " << int(maxByType[i]) << ", you have " << int(player->factories[i]) << ")" << endl;
-        whichFactory = (productionEnum_t) readUnsigned();
-        if (whichFactory > NEW_CHEMICALS || !maxByType[whichFactory])
-            return 0;
-        cout << "How many factories would you like to buy?  (at most " << int(maxByType[whichFactory]) << ") ";
-        amt_t numToBuy = readUnsigned();
-        if (numToBuy > maxByType[whichFactory])
-            numToBuy = maxByType[whichFactory];
-        return numToBuy;
+        for (;;) {
+            for (int i=ORE; i<=NEW_CHEMICALS; i++)
+                if (maxByType[i])
+                    cout << i << ". " << factoryNames[i] << " (at most " << int(maxByType[i]) << ", you have " << int(player->factories[i]) << ")" << endl;
+            cout << name << ", which factory would you like to purchase? (default is none) ";
+            whichFactory = (productionEnum_t) readUnsigned();
+            if (whichFactory == EMPTY)
+                return 0;
+            if (whichFactory > NEW_CHEMICALS || !maxByType[whichFactory]) {
+                cout << "You cannot buy factories of that type.\n";
+                continue;
+            }
+            cout << "How many factories would you like to buy?  (default is " << int(maxByType[whichFactory]) << ") ";
+            amt_t numToBuy = readUnsigned();
+            if (numToBuy == EMPTY)
+                return maxByType[whichFactory];
+            else if (numToBuy > maxByType[whichFactory]) {
+                cout << "That's more than you can buy of that type.\n";
+                continue;
+            }
+            return numToBuy;
+        }
     }
     amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) {
-        cout << name << ", how many colonists do you want to buy at " << perColonist << " each? (at most " << maxAllowed << ") ";
-        amt_t amt = readUnsigned();
-        if (amt <= maxAllowed)
-            return amt;
-        else
-            return maxAllowed;
+        for (;;) {
+            cout << name << ", how many colonists do you want to buy at " << perColonist << " each? (at most " << maxAllowed << ", default is none) ";
+            amt_t amt = readUnsigned();
+            if (amt == EMPTY)
+                return 0;
+            else if (amt <= maxAllowed)
+                return amt;
+            else
+                cout << "That's more than you can buy.\n";
+        }
     }
     amt_t purchaseRobots(money_t perRobot,amt_t maxAllowed,amt_t maxUsable) {
-        cout << name << ", how many robots do you want to buy at " << perRobot << " each? (at most " << maxAllowed << ", of which " << maxUsable << " can currently be used) ";
-        amt_t amt = readUnsigned();
-        if (amt <= maxAllowed)
-            return amt;
-        else
-            return maxAllowed;
+        for (;;) {
+            cout << name << ", how many robots do you want to buy at " << perRobot << " each? (at most " << maxAllowed << ", of which " << maxUsable << " can currently be used, default is none) ";
+            amt_t amt = readUnsigned();
+            if (amt == EMPTY)
+                return 0;
+            else if (amt <= maxAllowed)
+                return amt;
+            else
+                cout << "That's more than you can buy.\n";
+        }
     }
     void assignPersonnel() {
         // automatically assign personnel first
