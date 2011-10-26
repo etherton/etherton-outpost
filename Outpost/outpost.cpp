@@ -9,7 +9,9 @@
 
 #include <ctype.h>
 #include <stdlib.h>
+#include <time.h>
 
+#include <string>
 #include <iostream>
 #include <vector>
 #include <algorithm>
@@ -17,6 +19,8 @@
 using namespace std;
 
 typedef unsigned char byte_t;
+
+#define LINEBREAK (++nonzero==5?(nonzero=0,"\n\t"):" ")
 
 enum productionEnum_t { ORE, WATER, TITANIUM, RESEARCH, MICROBIOTICS, NEW_CHEMICALS, ORBITAL_MEDICINE, RING_ORE, MOON_ORE, PRODUCTION_COUNT };
 
@@ -144,7 +148,7 @@ public:
 
 typedef vector<productionDeck_t> bank_t;
 
-class player_t;
+struct player_t;
 
 class brain_t {
 protected:
@@ -164,10 +168,11 @@ public:
 
     void displayProductionCardsOnSingleLine(vector<card_t> &hand) {
         if (hand.size()) {
-            cout << "[ ";
+            int nonzero = 0;
+            cout << "[";
             for (cardIndex_t i=0; i<hand.size(); i++)
-                cout << factoryNames[hand[i].prodType] << "/" << int(hand[i].value) << " ";
-            cout << "]\n";
+                cout << LINEBREAK << factoryNames[hand[i].prodType] << "/" << int(hand[i].value);
+            cout << " ]\n";
         }
         else
             cout << "[ ** no production cards ** ]\n";
@@ -181,10 +186,10 @@ public:
     virtual amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) = 0;
     virtual amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) = 0;
     virtual amt_t purchaseRobots(money_t perRobot,amt_t maxAllowed,amt_t maxUsable) = 0;
-    virtual void assignPersonnel(vector<byte_t> &factories,vector<byte_t> &mannedByColonists,vector<byte_t> &mannedByRobots,amt_t robotLimit);
+    virtual void assignPersonnel(amt_t robotLimit);
 };
 
-class player_t {
+struct player_t {
     vector<card_t> hand;
     typedef vector<card_t>::iterator cardIt_t;
     byte_t colonists, colonistLimit, extraColonistLimit, robots, productionSize, productionLimit, unmannedSlots;
@@ -194,8 +199,7 @@ class player_t {
     vector<byte_t> mannedByRobots;
     vector<byte_t> upgrades;
     brain_t *brain;
-    friend class computerBrain_t;
-public:
+
     player_t() {
         colonists = 3;
         colonistLimit = 5;
@@ -249,7 +253,7 @@ public:
     }
 
     void drawProductionCards(bank_t &bank,bool firstTurn) {
-        for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++) {
+        for (int i=ORE; i<PRODUCTION_COUNT; i++) {
             int toDraw = mannedByColonists[i] + mannedByRobots[i];
             // special cases: each scientist upgrade produces a research card without being populated.
             // same for microbiotics.
@@ -257,8 +261,9 @@ public:
                 toDraw += upgrades[SCIENTISTS];
             else if (i==MICROBIOTICS)
                 toDraw += upgrades[ORBITAL_LAB];
-            toDraw <<= firstTurn;   // double production on first turn
-            while (toDraw >= 4 && bank[i].getMegaValue() && brain->wantMega(i)) {
+            if (firstTurn)
+                toDraw *= 2;   // double production on first turn
+            while (toDraw >= 4 && bank[i].getMegaValue() && brain->wantMega((productionEnum_t)i)) {
                 card_t megaCard = { bank[i].getMegaValue(), i, 4, false };
                 addCard(megaCard);
                 toDraw -= 4;
@@ -287,7 +292,7 @@ public:
     void newFactoryFromUpgrade(productionEnum_t which) {
         factories[which]++;
         // call base class to auto-assign to new factory if appropriate (note this may undo player's changes!)
-        brain->brain_t::assignPersonnel(factories,mannedByColonists,mannedByRobots,upgrades[ROBOTICS] * (colonistLimit + extraColonistLimit));
+        brain->brain_t::assignPersonnel(upgrades[ROBOTICS] * (colonistLimit + extraColonistLimit));
     }
     
     void addUpgrade(upgradeEnum_t upgrade) {
@@ -320,14 +325,14 @@ public:
     unsigned computeVictoryPoints() {
         unsigned vps = 0;
         // compute victory points for static upgrades
-        for (upgradeEnum_t i=DATA_LIBRARY; i<UPGRADE_COUNT; i++) {
+        for (int i=DATA_LIBRARY; i<UPGRADE_COUNT; i++) {
             static const byte_t vpsForUpgrade[UPGRADE_COUNT] = { 1,1,1,2,2, 3,3,5,5,5, 0,0,0 };
             vps += vpsForUpgrade[i] * upgrades[i];
         }
         // now include victory points for factories which are manned
         // note that microbiotics is counted during upgrades and can never be manned.
         // scientists are counted during upgrades as well but you can also buy/man research factories so they're counted here.
-        for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++) {
+        for (int i=ORE; i<PRODUCTION_COUNT; i++) {
             static const byte_t vpsForMannedFactory[PRODUCTION_COUNT] = { 1,1,2,2,0,3,10,15,20 };
             vps += vpsForMannedFactory[i] * (mannedByColonists[i] + mannedByRobots[i]);
         }
@@ -422,24 +427,24 @@ public:
                 payFor(purchased * price,bank,0);
             }
         }        
-        brain->assignPersonnel(factories,mannedByColonists,mannedByRobots,upgrades[ROBOTICS] * (colonistLimit + extraColonistLimit));
+        brain->assignPersonnel(upgrades[ROBOTICS] * (colonistLimit + extraColonistLimit));
     }
     
     void displayHoldings() {
         if (totalUpgradeCosts) {
-            int nonzero = 0;
-            cout << getName() << "'s upgrades: ";
-            for (upgradeEnum_t i=DATA_LIBRARY; i<UPGRADE_COUNT; i++)
+            int nonzero = 1;
+            cout << getName() << "'s upgrades:";
+            for (int i=DATA_LIBRARY; i<UPGRADE_COUNT; i++)
                 if (upgrades[i])
-                    cout << int(upgrades[i]) << "/" << upgradeNames[i] << (++nonzero==6?";\n\t" : "; ");
+                    cout << LINEBREAK << int(upgrades[i]) << "/" << upgradeNames[i] << ";";
             cout << endl;
         }
-        cout << getName() << "'s factories: ";
-        int nonzero = 0;
-        for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++)
+        cout << getName() << "'s factories:";
+        int nonzero = 1;
+        for (int i=ORE; i<PRODUCTION_COUNT; i++)
             if (factories[i])
-                cout << int(factories[i]) << "/" << factoryNames[i] << "(" << int(mannedByColonists[i]) << "+" << int(mannedByRobots[i]) << ");" << (++nonzero==6?"\n\t":" ");
-        cout << "Unused(" << int(mannedByColonists[PRODUCTION_COUNT]) << "+" << int(mannedByRobots[PRODUCTION_COUNT]) << ");\n";
+                cout << LINEBREAK << int(factories[i]) << "/" << factoryNames[i] << "(" << int(mannedByColonists[i]) << "+" << int(mannedByRobots[i]) << ");";
+        cout << LINEBREAK << "Unused(" << int(mannedByColonists[PRODUCTION_COUNT]) << "+" << int(mannedByRobots[PRODUCTION_COUNT]) << ");\n";
     }
     
     const string& getName() const { return brain->getName(); }
@@ -536,7 +541,7 @@ public:
         upgradeDrawPiles.reserve(PRODUCTION_COUNT);
         if (playerCount == 2) {
             int even = 0, odd = 0;
-            upgradeEnum_t i;
+            int i;
             for (i=DATA_LIBRARY; i<UPGRADE_COUNT; i++) {
                 if (rand() & 1) {
                     upgradeDrawPiles.push_back(1);
@@ -557,9 +562,9 @@ public:
         else {
             static const byte_t upgrades_1_10[10] = { 0,0,0, 2,3,3,4,5,5,6 };
             static const byte_t upgrades_11_13[10] = { 0,0,0, 2,3,4,4,5,6,6 };
-            for (upgradeEnum_t i=DATA_LIBRARY; i<SPACE_STATION; i++)
+            for (int i=DATA_LIBRARY; i<SPACE_STATION; i++)
                 upgradeDrawPiles.push_back(upgrades_1_10[playerCount]);
-            for (upgradeEnum_t i=SPACE_STATION; i<UPGRADE_COUNT; i++)
+            for (int i=SPACE_STATION; i<UPGRADE_COUNT; i++)
                 upgradeDrawPiles.push_back(upgrades_11_13[playerCount]);
         }
     }
@@ -608,7 +613,7 @@ public:
     void replaceUpgradeCards() {
         // figure out whether the market is totally empty or not
         bool marketEmpty = upgradeMarket.size() == 0;
-        for (upgradeEnum_t i=DATA_LIBRARY; i<(era==1?SCIENTISTS:SPACE_STATION) && marketEmpty; i++)
+        for (int i=DATA_LIBRARY; i<(era==1?SCIENTISTS:SPACE_STATION) && marketEmpty; i++)
             if (upgradeDrawPiles[i])
                 marketEmpty = false;
         static const byte_t minVpsForEra3[] = { 0,0,40,35,40,30,35,40,30,35 };
@@ -626,11 +631,11 @@ public:
         
         while (upgradeMarket.size() < players.size()) {
             // First check if any roll has a chance to succeeed
-            upgradeEnum_t firstMarket = era==3? WAREHOUSE : DATA_LIBRARY;
+            int firstMarket = era==3? WAREHOUSE : DATA_LIBRARY;
             int marketSize = era==3? 12 : era==2? 10 : 4;
             bool anyValid = false;
             // note that we start at zero because even in Era 3 an unpurchased Data Library could still come up for auction.
-            for (upgradeEnum_t i=DATA_LIBRARY; !anyValid && i<firstMarket+marketSize; i++)
+            for (int i=DATA_LIBRARY; !anyValid && i<firstMarket+marketSize; i++)
                 // if there is a card left of this type and we 
                 if (upgradeDrawPiles[i] && currentMarketCounts[i] != marketLimit)
                     anyValid = true;
@@ -638,26 +643,26 @@ public:
             if (!anyValid)
                 break;
             
-            upgradeEnum_t roll = static_cast<upgradeEnum_t>(firstMarket + (rand() % marketSize));
+            int roll = (firstMarket + (rand() % marketSize));
             for(;;) {
                 if (upgradeDrawPiles[roll] && currentMarketCounts[roll] != marketLimit)
                     break;
                 else if (roll) // try next upgrade downward
                     --roll;
                 else    // pick a new roll if we hit the bottom of the list
-                    roll = static_cast<upgradeEnum_t>(firstMarket + (rand() % marketSize));
+                    roll = (firstMarket + (rand() % marketSize));
             }
             
             cout << upgradeNames[roll] << " added to market.\n";
             upgradeDrawPiles[roll]--;
             currentMarketCounts[roll]++;
-            upgradeMarket.push_back(roll);
+            upgradeMarket.push_back((upgradeEnum_t)roll);
         }
-        cout << "Remaining upgrades: ";
-        int nonzero = 0;
-        for (upgradeEnum_t i=DATA_LIBRARY; i<UPGRADE_COUNT; i++)
+        cout << "Remaining upgrades:";
+        int nonzero = 1;
+        for (int i=DATA_LIBRARY; i<UPGRADE_COUNT; i++)
             if (upgradeDrawPiles[i])
-                cout << int(upgradeDrawPiles[i]) << "/" << upgradeNames[i] << (++nonzero==6?";\n\t" : "; ");
+                cout << LINEBREAK << int(upgradeDrawPiles[i]) << "/" << upgradeNames[i] << ";";
         if (nonzero == 0)
             cout << "[ none ]";
         cout << endl;
@@ -746,26 +751,26 @@ public:
     }
 };
 
-void brain_t::assignPersonnel(vector<byte_t> &factories,vector<byte_t> &mannedByColonists,vector<byte_t> &mannedByRobots,amt_t robotLimit) {
+void brain_t::assignPersonnel(amt_t robotLimit) {
     // everybody outta the pool!
-    for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++) {
-        mannedByColonists[PRODUCTION_COUNT] += mannedByColonists[i];
-        mannedByColonists[i] = 0;
-        mannedByRobots[PRODUCTION_COUNT] += mannedByRobots[i];
-        mannedByRobots[i] = 0;
+    for (int i=ORE; i<PRODUCTION_COUNT; i++) {
+        player->mannedByColonists[PRODUCTION_COUNT] += player->mannedByColonists[i];
+        player->mannedByColonists[i] = 0;
+        player->mannedByRobots[PRODUCTION_COUNT] += player->mannedByRobots[i];
+        player->mannedByRobots[i] = 0;
     }
     // assign to factories from the top down, favoring humans first
-    for (productionEnum_t i=MOON_ORE; i>=ORE; i--) {
-        while (mannedByColonists[i] < factories[i] && mannedByColonists[PRODUCTION_COUNT]) {
-            ++mannedByColonists[i];
-            --mannedByColonists[PRODUCTION_COUNT];
+    for (int i=MOON_ORE; i>=ORE; i--) {
+        while (player->mannedByColonists[i] < player->factories[i] && player->mannedByColonists[PRODUCTION_COUNT]) {
+            player->mannedByColonists[i]++;
+            player->mannedByColonists[PRODUCTION_COUNT]--;
         }
     }
     // fill in anything remaining with robots but only up to the limit
-    for (productionEnum_t i=ORBITAL_MEDICINE; i>=ORE && robotLimit; i--) {
-        while (robotLimit && (mannedByColonists[i] + mannedByRobots[i]) < factories[i] && mannedByRobots[PRODUCTION_COUNT]) {
-            ++mannedByRobots[i];
-            --mannedByRobots[PRODUCTION_COUNT];
+    for (int i=ORBITAL_MEDICINE; i>=ORE && robotLimit; i--) {
+        while (robotLimit && (player->mannedByColonists[i] + player->mannedByRobots[i]) < player->factories[i] && player->mannedByRobots[PRODUCTION_COUNT]) {
+            player->mannedByRobots[i]++;
+            player->mannedByRobots[PRODUCTION_COUNT]--;
             --robotLimit;
         }
     }
@@ -775,7 +780,7 @@ money_t brain_t::payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t min
     size_t best;
     
     // DEBUG CODE
-    cout << name << " needs to pay at least " << cost << " (of " << player->getTotalCredits() << ") from: ";
+    cout << name << " needs to pay at least " << cost << " (of " << player->getTotalCredits() << ") from:\n\t";
     displayProductionCardsOnSingleLine(hand);
     // END DEBUG CODE
     
@@ -822,7 +827,7 @@ money_t brain_t::findBestCards(money_t cost,vector<card_t> &hand,amt_t minResear
             // if this is better than our previous best guess, remember it.
             // note that since the deck is sorted by least to most we'll tend to favor ditching more
             // cheaper cards all other things considered equally
-            else if (testValue > cost && testValue < bestValue && testResearchCount > minResearchCards) {
+            else if (testValue > cost && testValue < bestValue && testResearchCount >= minResearchCards) {
                 best = i;
                 bestValue = testValue;
             }
@@ -837,7 +842,7 @@ money_t brain_t::findBestCards(money_t cost,vector<card_t> &hand,amt_t minResear
 class computerBrain_t: public brain_t {
     const game_t &game;
 public:
-    computerBrain_t(std::string name,const game_t &theGame) : brain_t(name), game(theGame) { } 
+    computerBrain_t(string name,const game_t &theGame) : brain_t(name), game(theGame) { } 
     bool wantMega(productionEnum_t) { 
         // this decision is hard -- need to factor in what cards we think are left in the deck,
         // and whether we're making any big purchases this turn, and whether we'd be over our
@@ -882,22 +887,10 @@ public:
     }
     amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) {
         // need more smarts here... shouldn't keep buying factories that we have no hope of staffing.
-        amt_t mostToBuy = player->mannedByColonists[PRODUCTION_COUNT] + player->mannedByRobots[PRODUCTION_COUNT];
-        for (productionEnum_t i=NEW_CHEMICALS; i>ORE; i--)
-            if (maxByType[i]) {
-                whichFactory = i;
-                amt_t want = (maxByType[i] + 1) / 2;
-                if (!mostToBuy) {
-                    // if we have no colonists remaining, we might still buy something if there are any operators available
-                    // in cheaper factories.
-                    want = 0;
-                    for (productionEnum_t j=productionEnum_t(i-1); j>=ORE && !want; j--)
-                        if (player->mannedByColonists[j] + player->mannedByRobots[j])
-                            want = 1;
-                }
-                else if (want > mostToBuy)
-                    want = mostToBuy;
-                return want;
+        for (int i=NEW_CHEMICALS; i>ORE; i--)
+            if (maxByType[i] && player->factories[i] < player->mannedByColonists[i] + player->mannedByRobots[i] + 2) {
+                whichFactory = (productionEnum_t)i;
+                return (maxByType[i] + 1) / 2;
             }
         return 0;
     }
@@ -930,7 +923,7 @@ static char readLetter() {
 
 class playerBrain_t: public brain_t {
 public:
-    playerBrain_t(std::string name) : brain_t(name) { }
+    playerBrain_t(string name) : brain_t(name) { }
     bool wantMega(productionEnum_t t) {
         cout << name << ", do you want a megaproduction card for " << factoryNames[t] << "? ";
         return readLetter() == 'Y';
@@ -1032,9 +1025,9 @@ public:
     }
     amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) {
         cout << name << ", which factory would you like to purchase? (empty line for none)\n";
-        for (productionEnum_t i=ORE; i<=NEW_CHEMICALS; i++)
+        for (int i=ORE; i<=NEW_CHEMICALS; i++)
             if (maxByType[i])
-                cout << i << ". " << factoryNames[i] << " (at most " << int(maxByType[i]) << ")" << endl;
+                cout << i << ". " << factoryNames[i] << " (at most " << int(maxByType[i]) << ", you have " << int(player->factories[i]) << ")" << endl;
         whichFactory = (productionEnum_t) readUnsigned();
         if (whichFactory > NEW_CHEMICALS || !maxByType[whichFactory])
             return 0;
@@ -1060,23 +1053,23 @@ public:
         else
             return maxAllowed;
     }
-    void assignPersonnel(vector<byte_t> &factories,vector<byte_t> &mannedByColonists,vector<byte_t> &mannedByRobots,amt_t robotLimit) {
+    void assignPersonnel(amt_t robotLimit) {
         // automatically assign personnel first
-        brain_t::assignPersonnel(factories,mannedByColonists,mannedByRobots,robotLimit);
+        brain_t::assignPersonnel(robotLimit);
         for (;;) {
             cout << name << ", here are your current allocations:\n";
             amt_t robotsInUse = 0;
-            for (productionEnum_t i=ORE; i<PRODUCTION_COUNT; i++) {
-                if (factories[i])
-                    cout << i << ". " << factoryNames[i] << ": " << int(factories[i]) << " factories manned by " << int(mannedByColonists[i]) << " colonists and " << int(mannedByRobots[i]) << " robots.\n";
-                robotsInUse += mannedByRobots[i];
+            for (int i=ORE; i<PRODUCTION_COUNT; i++) {
+                if (player->factories[i])
+                    cout << i << ". " << factoryNames[i] << ": " << int(player->factories[i]) << " factories manned by " << int(player->mannedByColonists[i]) << " colonists and " << int(player->mannedByRobots[i]) << " robots.\n";
+                robotsInUse += player->mannedByRobots[i];
             }
-            cout << PRODUCTION_COUNT << ". Unallocated: " << int(mannedByColonists[PRODUCTION_COUNT]) << " colonists, " << int(mannedByRobots[PRODUCTION_COUNT]) << " robots (max allocated is " << robotLimit << ").\n";
+            cout << PRODUCTION_COUNT << ". Unallocated: " << int(player->mannedByColonists[PRODUCTION_COUNT]) << " colonists, " << int(player->mannedByRobots[PRODUCTION_COUNT]) << " robots (max allocated is " << robotLimit << ").\n";
             cout << "Transfer colonist (c), robot (r), or anything else to finish? ";
             char cmd = readLetter();
             if (cmd != 'C' && cmd != 'R')
                 return;
-            vector<byte_t> &manned = (cmd == 'C')? mannedByColonists : mannedByRobots;
+            vector<byte_t> &manned = (cmd == 'C')? player->mannedByColonists : player->mannedByRobots;
             cout << "Transfer source? ";
             productionEnum_t src = (productionEnum_t)readUnsigned();
             if (src > PRODUCTION_COUNT || !manned[src]) {
@@ -1091,7 +1084,7 @@ public:
             }
             cout << "Transfer destination? ";
             productionEnum_t dst = (productionEnum_t)readUnsigned();
-            if (dst > PRODUCTION_COUNT || (dst != PRODUCTION_COUNT && factories[dst] < mannedByColonists[dst] + mannedByRobots[dst] + xferAmt)) {
+            if (dst > PRODUCTION_COUNT || (dst != PRODUCTION_COUNT && player->factories[dst] < player->mannedByColonists[dst] + player->mannedByRobots[dst] + xferAmt)) {
                 cout << "Sorry, that is an invalid transfer destination or there isn't enough room there.\n";
                 continue;
             }
