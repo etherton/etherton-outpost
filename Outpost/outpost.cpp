@@ -162,15 +162,15 @@ public:
 
     void displayProductionCards(vector<card_t> &hand,size_t annotateMask = 0) {
         for (cardIndex_t i=0; i<hand.size(); i++,annotateMask>>=1)
-            cout << i << ". " << factoryNames[hand[i].prodType] << "/" << int(hand[i].value) << (annotateMask&1?" ***":"") << endl;
+            cout << i << ". " << (annotateMask&1?"*":"") << factoryNames[hand[i].prodType] << "/" << int(hand[i].value) << endl;
     }
 
-    void displayProductionCardsOnSingleLine(vector<card_t> &hand) {
+    void displayProductionCardsOnSingleLine(vector<card_t> &hand,size_t annotateMask = 0) {
         if (hand.size()) {
             int nonzero = 0;
             cout << "[";
-            for (cardIndex_t i=0; i<hand.size(); i++)
-                cout << LINEBREAK << factoryNames[hand[i].prodType] << "/" << int(hand[i].value);
+            for (cardIndex_t i=0; i<hand.size(); i++,annotateMask>>=1)
+                cout << LINEBREAK <<(annotateMask&1?"*":"") << factoryNames[hand[i].prodType] << "/" << int(hand[i].value);
             cout << " ]\n";
         }
         else
@@ -378,8 +378,8 @@ struct player_t {
         return brain->pickCardToAuction(hand,upgradeMarket,bid);
     }
     
-    money_t raiseOrPass(upgradeEnum_t upgrade,money_t bid) {
-        return brain->raiseOrPass(hand,upgrade,bid);
+    money_t raiseOrPass(upgradeEnum_t upgrade,money_t minBid) {
+        return brain->raiseOrPass(hand,upgrade,minBid);
     }
 
     void purchaseFactories(bool firstTurn,bank_t &bank) {
@@ -670,10 +670,13 @@ public:
         }
         cout << "Remaining upgrades:";
         int nonzero = 1;
+        bool anyUpgradesRemaining = false;
         for (int i=DATA_LIBRARY; i<UPGRADE_COUNT; i++)
-            if (upgradeDrawPiles[i])
+            if (upgradeDrawPiles[i]) {
                 cout << LINEBREAK << int(upgradeDrawPiles[i]) << "/" << upgradeNames[i] << ";";
-        if (nonzero == 0)
+                anyUpgradesRemaining = true;
+            }
+        if (!anyUpgradesRemaining)
             cout << "[ none ]";
         cout << endl;
     }
@@ -711,7 +714,7 @@ public:
             for (;;) {
                 if (++nextBidder == players.size())
                     nextBidder = 0;
-                money_t newBid = players[nextBidder].raiseOrPass(upgrade,bid);
+                money_t newBid = players[nextBidder].raiseOrPass(upgrade,bid+1);
                 // somebody wants to bid?
                 if (newBid) {
                     highBidder = nextBidder;
@@ -732,7 +735,6 @@ public:
             if (bid > discount)
                 players[highBidder].payFor(bid - discount,bank,0);
             players[highBidder].addUpgrade(upgrade);
-            // TODO: you may immediately move personnel to a new factory even if you've already had your turn
         }
     }
 
@@ -918,19 +920,20 @@ public:
         bid = findBestCards(upgradeCosts[upgradeMarket[which]],hand,0,0);
         return which;
     }
-    money_t raiseOrPass(vector<card_t> &hand,upgradeEnum_t upgrade,money_t bid) {
+    money_t raiseOrPass(vector<card_t> &hand,upgradeEnum_t upgrade,money_t minBid) {
         // if we can't afford a higher bid, bail out now.
-        if (bid + 1 < player->getTotalCredits())
+        if (player->getTotalCredits() < minBid)
             return 0;
         // random chance we pass anyway, moreso if we already have one or more
         if (d4() + player->upgrades[upgrade] > 2)
             return 0;
         vector<card_t> handCopy(hand);
         amt_t discount = player->computeDiscount(upgrade);
-        if (discount >= bid+1)
+        // handle the (unlikely) case that it's free
+        if (discount >= minBid)
             return discount;
-        else
-            return findBestCards(bid+1 - discount,hand,0,0) + discount;
+        else    // find the closest match
+            return findBestCards(minBid - discount,hand,0,0) + discount;
     }
     amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) {
         // need more smarts here... shouldn't keep buying factories that we have no hope of staffing.
@@ -996,7 +999,7 @@ public:
                 if (which >= upgradeMarket.size())
                     return upgradeMarket.size();
                 else {
-                    bid = raiseOrPass(hand,upgradeMarket[which],upgradeCosts[upgradeMarket[which]]-1);
+                    bid = raiseOrPass(hand,upgradeMarket[which],upgradeCosts[upgradeMarket[which]]);
                     if (!bid) {      // couldn't make valid opening bid, bounce them to selection menu
                         cout << "You cannot afford that.\n";
                         break;
@@ -1007,24 +1010,26 @@ public:
             }
         }
     }
-    money_t raiseOrPass(vector<card_t> &hand,upgradeEnum_t upgrade,money_t bid) {
+    money_t raiseOrPass(vector<card_t> &hand,upgradeEnum_t upgrade,money_t minBid) {
         money_t discount = player->computeDiscount(upgrade);
         // don't bother asking if we cannot afford one higher than current bid
-        if (bid - discount >= player->getTotalCredits())
+        if (player->getTotalCredits() < minBid - discount)
             return 0;
 
-        displayProductionCardsOnSingleLine(hand);
+        size_t best;
+        money_t recommendedBid = findBestCards(minBid-discount,hand,0,&best) + discount;
+        displayProductionCardsOnSingleLine(hand,best);
         cout << name << ", you have " << player->getTotalCredits() << " and a discount of " << discount << " on this upgrade.\n";
-        if (bid == upgradeCosts[upgrade] - 1)
-            cout << name << ", please pick an opening bid for " << upgradeNames[upgrade] << " of at least " << bid+1 << " or empty line to pass: ";
+        if (minBid == upgradeCosts[upgrade])
+            cout << name << ", please pick an opening bid for " << upgradeNames[upgrade] << " of at least " << minBid << " or empty line to pass: (recommend " << recommendedBid << ") ";
         else
-            cout << name << ", the bid for " << upgradeNames[upgrade] << " is now at " << bid << ", enter a higher bid or empty line to pass: ";
+            cout << name << ", the minimum bid for " << upgradeNames[upgrade] << " is now at " << minBid << ", or empty line to pass: (recommend " << recommendedBid << ") ";
         for (;;) {
             money_t newBid = readUnsigned();
             if (newBid == 0 || newBid == EMPTY)
                 return 0;
-            else if (newBid <= bid)
-                cout << "The bid must either be 0 to pass or something at least " << bid+1 << ".  Your bid? (0 to pass) ";
+            else if (newBid < minBid)
+                cout << "The bid must either be 0 to pass or something at least " << minBid << ".  Your bid? (0 to pass) ";
             else if (newBid > player->getTotalCredits() + discount)
                 cout << "You only have " << player->getTotalCredits() << " (with a discount of " << discount << ") and cannot afford that bid.  Your bid? (0 to pass) ";
             else
