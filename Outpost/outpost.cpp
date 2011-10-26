@@ -314,8 +314,10 @@ struct player_t {
             productionLimit += 5;
         else if (upgrade == NODULE)
             colonistLimit += 3;
-        else if (upgrade == ROBOTICS)
+        else if (upgrade == ROBOTICS) {
             robots++;
+            mannedByRobots[PRODUCTION_COUNT]++;
+        }
         else if (upgrade == LABORATORY)
             newFactoryFromUpgrade(RESEARCH);
         else if (upgrade == OUTPOST) {
