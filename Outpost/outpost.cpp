@@ -78,7 +78,6 @@ struct cardDistribution_t {
 };
 
 class productionDeck_t {
-    string name;
     vector<byte_t> deck;
     typedef vector<byte_t>::iterator deckIt_t;
     vector<byte_t> discards;
@@ -186,13 +185,14 @@ public:
     virtual amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) = 0;
     virtual amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) = 0;
     virtual amt_t purchaseRobots(money_t perRobot,amt_t maxAllowed,amt_t maxUsable) = 0;
-    virtual void assignPersonnel(amt_t robotLimit);
+    virtual void assignPersonnel();
+    virtual void moveOperatorToNewFactory(productionEnum_t newFactory);
 };
 
 struct player_t {
     vector<card_t> hand;
     typedef vector<card_t>::iterator cardIt_t;
-    byte_t colonists, colonistLimit, extraColonistLimit, robots, productionSize, productionLimit, unmannedSlots;
+    byte_t colonists, colonistLimit, extraColonistLimit, robots, productionSize, productionLimit;
     money_t totalCredits, totalUpgradeCosts;
     vector<byte_t> factories;
     vector<byte_t> mannedByColonists;
@@ -289,10 +289,19 @@ struct player_t {
             cout << getName() << " discarded " << discarded << " production card" << (discarded>1?"s":"") << ".\n";
     }
     
+    amt_t getRobotLimit() const { return upgrades[ROBOTICS] * (colonistLimit + extraColonistLimit); }
+    
+    amt_t getRobotsInUse() const { 
+        amt_t result = 0;
+        // robots cannot ever be in era 3 upgrades.
+        for (int i=ORE; i<ORBITAL_MEDICINE; i++)
+            result += mannedByRobots[i];
+        return result;
+    }
+        
     void newFactoryFromUpgrade(productionEnum_t which) {
         factories[which]++;
-        // call base class to auto-assign to new factory if appropriate (note this may undo player's changes!)
-        brain->brain_t::assignPersonnel(upgrades[ROBOTICS] * (colonistLimit + extraColonistLimit));
+        brain->moveOperatorToNewFactory(which);
     }
     
     void addUpgrade(upgradeEnum_t upgrade) {
@@ -392,7 +401,6 @@ struct player_t {
                 brain->payFor(firstTurn&&whichFactory==WATER? totalCredits : numToBuy * factoryCosts[whichFactory],hand,bank,whichFactory==NEW_CHEMICALS? numToBuy : 0);
                 cout << getName() << " bought " << numToBuy << " " << factoryNames[whichFactory] << " factor" << (numToBuy>1?"ies":"y") << ".\n";
                 factories[whichFactory] += numToBuy;
-                unmannedSlots += numToBuy;
                 // when we cycle up again there will be no special case.
             }
             else
@@ -427,7 +435,7 @@ struct player_t {
                 payFor(purchased * price,bank,0);
             }
         }        
-        brain->assignPersonnel(upgrades[ROBOTICS] * (colonistLimit + extraColonistLimit));
+        brain->assignPersonnel();
     }
     
     void displayHoldings() {
@@ -751,7 +759,9 @@ public:
     }
 };
 
-void brain_t::assignPersonnel(amt_t robotLimit) {
+void brain_t::assignPersonnel() {
+    amt_t robotLimit = player->getRobotLimit();
+    
     // everybody outta the pool!
     for (int i=ORE; i<PRODUCTION_COUNT; i++) {
         player->mannedByColonists[PRODUCTION_COUNT] += player->mannedByColonists[i];
@@ -836,6 +846,41 @@ money_t brain_t::findBestCards(money_t cost,vector<card_t> &hand,amt_t minResear
     if (bestOut)
         *bestOut = best;
     return bestValue;
+}
+
+void brain_t::moveOperatorToNewFactory(productionEnum_t dest) {
+    bool robotCanOperate = (dest < ORBITAL_MEDICINE);
+    // always choose an unused colonist first
+    if (player->mannedByColonists[PRODUCTION_COUNT]) {
+        cout << name << " moves an unused colonist to operate the new " << factoryNames[dest] << ".\n";
+        player->mannedByColonists[PRODUCTION_COUNT]--;
+        player->mannedByColonists[dest]++;
+    }
+    // next choose an unused robot, but only if we're not at the limit yet and the robot can work there.
+    else if (player->mannedByRobots[PRODUCTION_COUNT] && player->getRobotsInUse() < player->getRobotLimit() && robotCanOperate) {
+        cout << name << " moves an unused robot to operate the new " << factoryNames[dest] << ".\n";
+        player->mannedByRobots[PRODUCTION_COUNT]--;
+        player->mannedByRobots[dest]++;
+    }
+    else {
+        // find the first available colonist or robot at any factory "worse" than this one
+        for (int i=ORE; i<dest; i++) {
+            if (player->mannedByColonists[i]) {
+                cout << name << " moves a colonist from " << factoryNames[i] << " to operate the new " << factoryNames[dest] << ".\n";
+                player->mannedByColonists[i]--;
+                player->mannedByColonists[dest]++;
+                return;
+            }
+            else if (robotCanOperate && player->mannedByRobots[i]) {
+                cout << name << " moves a robot from " << factoryNames[i] << " to operate the new " << factoryNames[dest] << ".\n";
+                player->mannedByRobots[i]--;
+                player->mannedByRobots[dest]++;
+                return;
+            }
+        }
+        cout << name << " didn't find a suitable operator for the new " << factoryNames[dest] << ".\n";
+    }
+      
 }
 
 
@@ -1053,16 +1098,16 @@ public:
         else
             return maxAllowed;
     }
-    void assignPersonnel(amt_t robotLimit) {
+    void assignPersonnel() {
         // automatically assign personnel first
-        brain_t::assignPersonnel(robotLimit);
+        brain_t::assignPersonnel();
+        amt_t robotLimit = player->getRobotLimit();
         for (;;) {
             cout << name << ", here are your current allocations:\n";
-            amt_t robotsInUse = 0;
+            amt_t robotsInUse = player->getRobotsInUse();
             for (int i=ORE; i<PRODUCTION_COUNT; i++) {
                 if (player->factories[i])
                     cout << i << ". " << factoryNames[i] << ": " << int(player->factories[i]) << " factories manned by " << int(player->mannedByColonists[i]) << " colonists and " << int(player->mannedByRobots[i]) << " robots.\n";
-                robotsInUse += player->mannedByRobots[i];
             }
             cout << PRODUCTION_COUNT << ". Unallocated: " << int(player->mannedByColonists[PRODUCTION_COUNT]) << " colonists, " << int(player->mannedByRobots[PRODUCTION_COUNT]) << " robots (max allocated is " << robotLimit << ").\n";
             cout << "Transfer colonist (c), robot (r), or anything else to finish? ";
@@ -1094,6 +1139,10 @@ public:
             }
             else if (dst >= ORBITAL_MEDICINE && dst <= MOON_ORE && cmd == 'R') {
                 cout << "Sorry, you cannot staff robots at those Special Factories.\n";
+                continue;
+            }
+            else if (src >= ORBITAL_MEDICINE && dst < ORBITAL_MEDICINE && player->colonists > player->colonistLimit) {
+                cout << "Sorry, you cannot transfer from an era 3 upgrade to a lower upgrade when over your colonist limit.\n";
                 continue;
             }
             // otherwise, perform the transfer
