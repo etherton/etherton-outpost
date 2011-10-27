@@ -249,7 +249,7 @@ public:
             active << "[ ** no production cards ** ]\n";
     }
 
-    virtual bool wantMega(productionEnum_t) = 0;
+    virtual amt_t wantMega(productionEnum_t which,amt_t maxMega) = 0;
     virtual cardIndex_t pickDiscard(vector<card_t> &hand) = 0;
     virtual cardIndex_t pickCardToAuction(vector<card_t> &hand,vector<upgradeEnum_t> &upgradeMarket,money_t &bid) = 0;
     virtual money_t raiseOrPass(vector<card_t> &hand,upgradeEnum_t upgrade,money_t bid) = 0;
@@ -325,6 +325,18 @@ struct player_t {
     }
 
     void drawProductionCards(bank_t &bank,bool firstTurn) {
+        // have to decide whether to draw megaproduction cards first
+        // this isn't strictly necessary according to the rules since we don't display any cards
+        // until all have already been drawn, but it's more of a user interface issue where we
+        // have to stop and ask in the middle of displaying status text.
+        vector<byte_t> megaCount;
+        megaCount.resize(PRODUCTION_COUNT);
+        for (int i=ORE; i<PRODUCTION_COUNT; i++) {
+            int maxMega = (mannedByColonists[i] + mannedByRobots[i]) / 4;
+            if (bank[i].getMegaValue() && maxMega)
+                megaCount[i] = brain->wantMega((productionEnum_t)i,maxMega);
+        }
+                         
         table << getName() << " draws ";
         bool firstCard = true;
         for (int i=ORE; i<PRODUCTION_COUNT; i++) {
@@ -337,12 +349,15 @@ struct player_t {
                 toDraw += upgrades[ORBITAL_LAB];
             if (firstTurn)
                 toDraw *= 2;   // double production on first turn
-            while (toDraw >= 4 && bank[i].getMegaValue() && brain->wantMega((productionEnum_t)i)) {
+            if (megaCount[i]) {
                 card_t megaCard = { bank[i].getMegaValue(), i, 4, false };
-                addCard(megaCard);
-                toDraw -= 4;
-                table << (firstCard?"":", ") << factoryNames[i] << " Mega";
+                table << (firstCard?"":", ") << megaCount[i] << " " << factoryNames[i] << " Mega";
                 firstCard = false;
+                while (megaCount[i]) {
+                    addCard(megaCard);
+                    toDraw -= 4;
+                    megaCount[i]--;
+                }
             }
             if (toDraw) {
                 table << (firstCard?"":", ") << toDraw << " " << factoryNames[i] << (toDraw>1?" cards":" card");
@@ -970,7 +985,7 @@ class computerBrain_t: public brain_t {
     const game_t &game;
 public:
     computerBrain_t(string name,const game_t &theGame) : brain_t(name), game(theGame) { } 
-    bool wantMega(productionEnum_t) { 
+    amt_t wantMega(productionEnum_t,amt_t maxMega) { 
         // this decision is hard -- need to factor in what cards we think are left in the deck,
         // and whether we're making any big purchases this turn, and whether we'd be over our
         // hand limit and have to discard.
@@ -1035,9 +1050,17 @@ public:
 class playerBrain_t: public brain_t {
 public:
     playerBrain_t(string name) : brain_t(name) { }
-    bool wantMega(productionEnum_t t) {
-        active << name << ", do you want a megaproduction card for " << factoryNames[t] << "? ";
-        return readLetter() == 'Y';
+    amt_t wantMega(productionEnum_t t,amt_t maxMega) {
+        for (;;) {
+            active << name << ", how many megaproduction cards for " << factoryNames[t] << "do you want (empty for none, at most " << maxMega << ")? ";
+            amt_t answer = readUnsigned();
+            if (answer == EMPTY)
+                return 0;
+            else if (answer <= maxMega)
+                return answer;
+            else
+                active << "That is too many megaproduction cards.\n";
+        }
     }
    cardIndex_t pickDiscard(vector<card_t> &hand) {
         active << name << ", you are over your hand limit.\n";
