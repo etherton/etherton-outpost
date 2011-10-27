@@ -18,8 +18,63 @@
 
 using namespace std;
 
-#define table cout
 #define active table
+
+class mystream_t {
+    string buffer;
+    int column;
+    static const int margin = 80;
+public:
+    mystream_t() : column(0) { }
+
+    void hadInput() { column = 0; }
+    
+    mystream_t &operator<<(const char*s) { 
+        while (*s) {
+            char c = *s++;
+            if (c == ' ' || c == '\n') {
+                if (buffer.size()) {
+                    if (column + buffer.size() > margin) {
+                        cout << "\n    ";
+                        column = 4;
+                    }
+                    cout << buffer;
+                    column += buffer.size();
+                    buffer.clear();
+                }
+                if (c == ' ') {
+                    if (++column==margin)
+                        c = '\n';
+                }
+                if (c == '\n')
+                    column = 0;
+                cout << c;
+            }
+            else
+                buffer.push_back(c);
+        }
+        return *this;
+    }
+    mystream_t &operator<<(unsigned long lu) {
+        char buf[32];
+        sprintf(buf,"%lu",lu);
+        return operator<<(buf);
+    }
+    mystream_t &operator<<(unsigned u) {
+        char buf[32];
+        sprintf(buf,"%u",u);
+        return operator<<(buf);
+    }
+    mystream_t &operator<<(int i) {
+        char buf[32];
+        sprintf(buf,"%d",i);
+        return operator<<(buf);
+    }
+    mystream_t &operator<<(const string& s) { return operator<<(s.c_str()); }
+};
+
+mystream_t table;
+
 
 typedef unsigned char byte_t;
 
@@ -59,6 +114,7 @@ static const unsigned EMPTY = 0x7FFFFFFF;
 static unsigned readUnsigned() {
     string answer;
     getline(cin,answer);
+    table.hadInput();
     if (answer.size())
         return atoi(answer.c_str());
     else
@@ -68,6 +124,7 @@ static unsigned readUnsigned() {
 static char readLetter() {
     string answer;
     getline(cin,answer);
+    table.hadInput();
     return toupper(answer[0]);
 }
 
@@ -185,7 +242,7 @@ public:
         if (hand.size()) {
             active << "[";
             for (cardIndex_t i=0; i<hand.size(); i++,annotateMask>>=1)
-                cout << (annotateMask&1?" *":" ") << factoryNames[hand[i].prodType] << "/" << int(hand[i].value);
+                active << (annotateMask&1?" *":" ") << factoryNames[hand[i].prodType] << "/" << int(hand[i].value);
             active << " ]\n";
         }
         else
@@ -469,14 +526,14 @@ struct player_t {
             table << getName() << "'s upgrades:";
             for (int i=DATA_LIBRARY; i<UPGRADE_COUNT; i++)
                 if (upgrades[i])
-                    table << int(upgrades[i]) << "/" << upgradeNames[i] << ";";
+                    table << " " << int(upgrades[i]) << "/" << upgradeNames[i] << ";";
             table << "\n";
         }
         table << getName() << "'s factories:";
         for (int i=ORE; i<PRODUCTION_COUNT; i++)
             if (factories[i])
-                table << int(factories[i]) << "/" << factoryNames[i] << "(" << int(mannedByColonists[i]) << "+" << int(mannedByRobots[i]) << ");";
-        table << "Unused(" << int(mannedByColonists[PRODUCTION_COUNT]) << "+" << int(mannedByRobots[PRODUCTION_COUNT]) << ");\n";
+                table << " " << int(factories[i]) << "/" << factoryNames[i] << "(" << int(mannedByColonists[i]) << "+" << int(mannedByRobots[i]) << ");";
+        table << " Unused(" << int(mannedByColonists[PRODUCTION_COUNT]) << "+" << int(mannedByRobots[PRODUCTION_COUNT]) << ");\n";
     }
     
     const string& getName() const { return brain->getName(); }
@@ -695,7 +752,7 @@ public:
         bool anyUpgradesRemaining = false;
         for (int i=DATA_LIBRARY; i<UPGRADE_COUNT; i++)
             if (upgradeDrawPiles[i]) {
-                table << int(upgradeDrawPiles[i]) << "/" << upgradeNames[i] << ";";
+                table << " " << int(upgradeDrawPiles[i]) << "/" << upgradeNames[i] << ";";
                 anyUpgradesRemaining = true;
             }
         if (!anyUpgradesRemaining)
@@ -1199,7 +1256,7 @@ int main() {
     unsigned seed = (unsigned) time(NULL);
     
     for (;;) {
-        cout << "Number of players?  (2-9) ";
+        table << "Number of players?  (2-9) ";
         playerCount = readUnsigned();
         if (playerCount < 2 || playerCount > 9)
             seed = playerCount;
@@ -1207,7 +1264,7 @@ int main() {
             break;
     }
 
-    cout << "(using " << seed << " as RNG seed)" << "\n";
+    table << "(using " << seed << " as RNG seed)" << "\n";
     srand(seed);
 
     game_t game(playerCount);
@@ -1225,13 +1282,13 @@ int main() {
     random_shuffle(computerNames.begin(), computerNames.end());
   
     // attach brains to each player
-    cout << "If you enter an empty string for a name, that and all future players will be run by computer.\n";
-    cout << "Players should be entered in seating order (aka auction bidding order).\n";
+    table << "If you enter an empty string for a name, that and all future players will be run by computer.  ";
+    table << "Players should be entered in seating order (aka auction bidding order).\n";
     bool anyHumans = true;
     for (int i=0; i<playerCount; i++) {
         string name;
         if (anyHumans) {
-            cout << "Player " << i+1 << " name? ";
+            table << "Player " << i+1 << " name? ";
             getline(cin,name);
             if (name.size() == 0)
                 anyHumans = false;
@@ -1260,10 +1317,10 @@ int main() {
     // now enter the normal turn progression
     do {
         ++round;
-        cout << "\t\n\n";
-        cout << "\t=======================\n";
-        cout << "\t===  R O U N D  " << ((round<10)?" ":"") << round << "  ===\n";
-        cout << "\t=======================\n\n";
+        table << "\n\n";
+        table << "        =======================\n";
+        table << "        ===  R O U N D  " << ((round<10)?" ":"") << round << "  ===\n";
+        table << "        =======================\n\n";
         game.displayPlayerOrder();
         game.replaceUpgradeCards();
         game.drawProductionCards();
