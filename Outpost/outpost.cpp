@@ -1052,7 +1052,7 @@ public:
     playerBrain_t(string name) : brain_t(name) { }
     amt_t wantMega(productionEnum_t t,amt_t maxMega) {
         for (;;) {
-            active << name << ", how many megaproduction cards for " << factoryNames[t] << "do you want (empty for none, at most " << maxMega << ")? ";
+            active << name << ", how many megaproduction cards for " << factoryNames[t] << " do you want (empty for none, at most " << maxMega << ")? ";
             amt_t answer = readUnsigned();
             if (answer == EMPTY)
                 return 0;
