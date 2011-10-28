@@ -22,33 +22,47 @@ using namespace std;
 
 class mystream_t {
     string buffer;
-    int column;
-    static const int margin = 80;
+    int column, leftMargin;
+    static const int margin = 79;
 public:
-    mystream_t() : column(0) { }
+    mystream_t() : column(0), leftMargin(0) { }
 
     void hadInput() { column = 0; }
+
+    void wordbreak() {
+        cout << "\n";
+        column = 0;
+        while (column < leftMargin) {
+            cout << " ";
+            ++column;
+        }
+    }
+    
+    void setLeftMargin(int lm) { leftMargin = lm; }
     
     mystream_t &operator<<(const char*s) { 
         while (*s) {
             char c = *s++;
             if (c == ' ' || c == '\n') {
                 if (buffer.size()) {
-                    if (column + buffer.size() > margin) {
-                        cout << "\n    ";
-                        column = 4;
-                    }
+                    if (column + buffer.size() > margin)
+                        wordbreak();
                     cout << buffer;
                     column += buffer.size();
                     buffer.clear();
                 }
                 if (c == ' ') {
-                    if (++column==margin)
-                        c = '\n';
+                    if (column == leftMargin)
+                        ;
+                    else if (++column==margin)
+                        wordbreak();
+                    else
+                        cout << " ";
                 }
-                if (c == '\n')
+                else {
+                    cout << "\n";
                     column = 0;
-                cout << c;
+                }
             }
             else
                 buffer.push_back(c);
@@ -103,6 +117,65 @@ enum upgradeEnum_t {
 
 const char *upgradeNames[UPGRADE_COUNT] = { "DataLibrary", "Warehouse", "HeavyEquipment", "Nodule", "Scientists", "OrbitalLab", "Robotics",
     "Laboratory", "Ecoplants", "Outpost", "SpaceStation", "PlanetaryCruiser", "MoonBase" };
+
+const char *upgradeHelp[UPGRADE_COUNT] = {
+    "-10$ for Scientists, -10$ for Laboratory",
+    "+5 Production capacity",
+    "Can build Titanium (~10$) factory; -5$ Warehouse, -5$ Nodule, -15$ Outpost",
+    "+3 Colonist capacity",
+    "1 free Research (~13$) card/turn",
+    
+    "1 free Microbiotics (~17$) card/turn",
+    "1 free Robot, can buy and use Robots",
+    "1 free Research factory; can build Research (~13$) factories",
+    "Colonists cost 5; -10$ for Outpost",
+    "+5 Colonist capacity, +5 Production capacity, 1 free Titanium (~10$) factory",
+    
+    "1 Orbital Medicine (~30$) card/turn when manned by colonist",
+    "1 Ring Ore (~40$) card/turn when manned by colonist",
+    "1 Moon Ore (~50$) card/turn when manned by colonist"
+};
+
+const char *basicRules =
+    "The goal of Outpost is to reach 75 victory points before any of your opponents.  "
+    "You earn victory points by purchasing Colony Upgrades and operating Factories.\n\n"
+    "The first four upgrades are available during Era 1; once somebody reaches 10VP, six more Era 2 upgrades become available.  "
+    "Finally, once somebody reaches 30-40VP (depending on number of players) the last three Era 3 upgrades become available.\n\n"
+
+    "You earn money by operating Factories; you can spend that money on Colony Upgrades, Factories, Colonists, and Robots.  "
+    "You need Colonists or Robots in order to operate Factories.  "
+    "At the beginning of the game, you begin with 3 colonists and can hold up to 5 of them; additional ones cost 10 unless you buy Ecoplants, which lowers their price to 5.  "
+    "You can raise the Colonist limit by purchasing Nodules(+3) and Outposts(+5).\n\n"
+    "If you buy the Robotics Colony Upgrade, you will gain the ability to purchase and use Robots to operate your factories as well.  "
+    "However, you can never use more than one Robot per Colonist per Robotics upgrade.  "
+    "The three Era 3 factories can only be operated by Colonists, but those Colonists do not count against Colonist capacity.\n\n"
+
+    "At the beginning of each round, players are assigned turn order in descending number of victory points; face value of upgrades breaks ties.  "
+    "Each player draws one production card for each factory that was operated last turn, along with bonus production cards from Scientist and Orbital Lab upgrades.  "
+    "For Water, Titanium, and New Chemicals, if you have at least 4 factories of that type you may instead choose to draw a Mega card with a fixed value (30, 44, or 88, slightly "
+    "more than four times the average production).  These Mega cards still count as four cards for your hand limit.  Research and Microbiotics production cards do NOT count against your hand limit.  "
+    "After that, any player over their Production capacity (their hand limit, which starts at 10 but can be raised by Warehouse and Outpost upgrades) must discard "
+    "excess cards down to their hand limit.\n\n"
+
+    "On their turn, a player chooses to auction zero or more upgrades; they declare an opening bid (at or above that upgrade's minimum bid) and "
+    "bidding proceeds around the table; each player can pass or raise the bid.  The auction ends when all other players pass after a bid, but "
+    "a player who passed earlier in the auction can re-bid again if they get a chance.  Winner pays for the auction by discarding production "
+    "cards from their hand, less any discounts, but no change is given.\n\n"
+
+    "Once a player cannot or chooses not to initiate any more auctions, they may now purchase factories, colonists, and robots.  "
+    "You pay for each type of item separately, but you can buy more than one of an item and pay only that total amount.  "
+    "Finally you may allocate colonists (and robots, if available) to your factories.\n\n"
+
+    "Whenever you pay for something, you may always overpay but you will never get change back.  The computer will recommend the best set of cards that satisfies your debt.  "
+    "During auctions, the computer will tell you the minimum bid and the actual amount you can exactly pay, which is sometimes higher.\n\n"
+
+    "You can purchase Ore and Water factories at any time.  You can purchase Titanium factories if you own Heavy Equipment upgrade.  You can purchase Research "
+    "factories if you own Laboratory.  You can purchase New Chemicals factories only if at least one Research card is used to pay for each one (which means "
+    "that you must own either Scientists or Laboratory).  Microbiotics, Orbital Medicine, Ring Ore, and Moon Ore factories cannot be directly purchased, "
+    "but you receive one factory free with each matching Colony Upgrade.  As a special case on the first turn of the game, you may turn in all six of your original "
+    "production cards for one Water factory even if you couldn't otherwise afford one.\n\n"
+    ;
+    
 
 
 const byte_t upgradeCosts[UPGRADE_COUNT] = { 15,25,30,25,40, 50,50,80,30,100, 120,160,200 };
@@ -483,7 +556,7 @@ struct player_t {
             vector<byte_t> forPurchase;
             getMaxFactories(forPurchase);
             productionEnum_t whichFactory;
-            // special case - can always afford a water factory
+            // special case - on first turn we can trade in all cards for a water factory even if we couldn't normally afford one.
             if (firstTurn && !forPurchase[WATER] && hand.size() == 6)
                 forPurchase[WATER] = 1;
             // otherwise if we cannot afford any ore, don't bother asking
@@ -495,7 +568,7 @@ struct player_t {
             // ... ask which factory we want to purchase, and how many ...
             amt_t numToBuy = brain->purchaseFactories(forPurchase,whichFactory);
             if (numToBuy) {
-                // if it's the first turn water special case, pay what we have instead of its actual cost.
+                // if it's the first turn water special case, pay what we have instead of its actual cost
                 brain->payFor(firstTurn&&whichFactory==WATER? totalCredits : numToBuy * factoryCosts[whichFactory],hand,bank,whichFactory==NEW_CHEMICALS? numToBuy : 0);
                 table << getName() << " bought " << numToBuy << " " << factoryNames[whichFactory] << " factor" << (numToBuy>1?"ies":"y") << ".\n";
                 factories[whichFactory] += numToBuy;
@@ -758,7 +831,7 @@ public:
                     roll = (firstMarket + (rand() % marketSize));
             }
             
-            table << upgradeNames[roll] << " added to market.\n";
+            table << upgradeNames[roll] << " added to market (" << upgradeHelp[roll] << ").\n";
             upgradeDrawPiles[roll]--;
             currentMarketCounts[roll]++;
             upgradeMarket.push_back((upgradeEnum_t)roll);
@@ -1277,6 +1350,8 @@ int main() {
 
     // seed the RNG, but let it be overridden from user input
     unsigned seed = (unsigned) time(NULL);
+
+    table << basicRules;
     
     for (;;) {
         table << "Number of players?  (2-9) ";
@@ -1307,6 +1382,8 @@ int main() {
     // attach brains to each player
     table << "If you enter an empty string for a name, that and all future players will be run by computer.  ";
     table << "Players should be entered in seating order (aka auction bidding order).\n";
+    table.setLeftMargin(4);
+    
     bool anyHumans = true;
     for (int i=0; i<playerCount; i++) {
         string name;
