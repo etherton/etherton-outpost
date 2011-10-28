@@ -52,9 +52,7 @@ public:
                     buffer.clear();
                 }
                 if (c == ' ') {
-                    if (column == leftMargin)
-                        ;
-                    else if (++column==margin)
+                    if (++column==margin)
                         wordbreak();
                     else
                         cout << " ";
@@ -96,7 +94,21 @@ enum productionEnum_t { ORE, WATER, TITANIUM, RESEARCH, MICROBIOTICS, NEW_CHEMIC
 
 const char *factoryNames[PRODUCTION_COUNT] = { "Ore", "Water", "Titanium", "Research", "Microbiotics", "NewChemicals", "OrbitalMedicine", "RingOre", "MoonOre" };
 
+const char *factoryHelp[PRODUCTION_COUNT] = { 
+    "Requires colonist or robot; 2 at start of game (earns  1-5$, avg 3$)",
+    "Requires colonist or robot; 1 at start of game; has Mega worth 30$ (earns 4-10$, avg 7$)",
+    "Requires Heavy Equipment and colonist or robot; has Mega worth 44$ (earns 7-13$, avg 10$)",
+    "Requires Laboratory (and operator) or Scientists (no operator required) (earns 9-17$, avg 13$)",
+    "Requires 1 Orbital Lab/factory (no operator required) (earns 14-20$, avg 17$)",
+    "Requires colonist or robot; must be paid for with at least one Research card per factory purchased; has Mega worth 88$ (earns 14-26$, avg 20$)",
+    "Requires 1 Space Station and colonist/factory (earns 20-40$, avg 30$)",
+    "Requires 1 PlanetaryCruiser and colonist/factory (earns 30-50$, avg 40$)",
+    "Requires 1 MoonBase and colonist/factory (earns 40-60$, avg 50$)"
+};
+
 static const byte_t factoryCosts[] = { 10,20,30,30,0,60,0,0,0 };
+
+static const byte_t vpsForMannedFactory[PRODUCTION_COUNT] = { 1,1,2,2,0,3,10,15,20 };
 
 enum upgradeEnum_t { 
     DATA_LIBRARY, 
@@ -118,17 +130,19 @@ enum upgradeEnum_t {
 const char *upgradeNames[UPGRADE_COUNT] = { "DataLibrary", "Warehouse", "HeavyEquipment", "Nodule", "Scientists", "OrbitalLab", "Robotics",
     "Laboratory", "Ecoplants", "Outpost", "SpaceStation", "PlanetaryCruiser", "MoonBase" };
 
+static const byte_t vpsForUpgrade[UPGRADE_COUNT] = { 1,1,1,2,2, 3,3,5,5,5, 0,0,0 };
+
 const char *upgradeHelp[UPGRADE_COUNT] = {
-    "-10$ for Scientists, -10$ for Laboratory",
+    "10$ discount/Scientists, 10$ discount/Laboratory",
     "+5 Production capacity",
-    "Can build Titanium (~10$) factory; -5$ Warehouse, -5$ Nodule, -15$ Outpost",
+    "Can build Titanium (~10$) factory; 5$ discount/Warehouse, 5$ discount/Nodule, 15$ discount/Outpost",
     "+3 Colonist capacity",
-    "1 free Research (~13$) card/turn",
-    
+
+    "1 free Research (~13$) card/turn",    
     "1 free Microbiotics (~17$) card/turn",
     "1 free Robot, can buy and use Robots",
     "1 free Research factory; can build Research (~13$) factories",
-    "Colonists cost 5; -10$ for Outpost",
+    "Colonists cost 5; 10$ discount/Outpost",
     "+5 Colonist capacity, +5 Production capacity, 1 free Titanium (~10$) factory",
     
     "1 Orbital Medicine (~30$) card/turn when manned by colonist",
@@ -137,42 +151,46 @@ const char *upgradeHelp[UPGRADE_COUNT] = {
 };
 
 const char *basicRules =
-    "The goal of Outpost is to reach 75 victory points before any of your opponents.  "
+    "\nO U T P O S T\n\n"
+    "Based on the board game designed by James Hlavaty, current edition published by Stronghold Games (www.strongholdgames.com).\n\n"
+    "The goal of Outpost is to reach 75 victory points before any of your opponents. "
     "You earn victory points by purchasing Colony Upgrades and operating Factories.\n\n"
-    "The first four upgrades are available during Era 1; once somebody reaches 10VP, six more Era 2 upgrades become available.  "
+    "The first four upgrades are available during Era 1; once somebody reaches 10VP, six more Era 2 upgrades become available. "
     "Finally, once somebody reaches 30-40VP (depending on number of players) the last three Era 3 upgrades become available.\n\n"
 
-    "You earn money by operating Factories; you can spend that money on Colony Upgrades, Factories, Colonists, and Robots.  "
-    "You need Colonists or Robots in order to operate Factories.  "
-    "At the beginning of the game, you begin with 3 colonists and can hold up to 5 of them; additional ones cost 10 unless you buy Ecoplants, which lowers their price to 5.  "
+    "You earn money by operating Factories; you can spend that money on Colony Upgrades, Factories, Colonists, and Robots. "
+    "You need Colonists or Robots in order to operate Factories. "
+    "At the beginning of the game, you begin with 3 colonists and can hold up to 5 of them; additional ones cost 10 unless you buy Ecoplants, which lowers their price to 5. "
     "You can raise the Colonist limit by purchasing Nodules(+3) and Outposts(+5).\n\n"
-    "If you buy the Robotics Colony Upgrade, you will gain the ability to purchase and use Robots to operate your factories as well.  "
-    "However, you can never use more than one Robot per Colonist per Robotics upgrade.  "
+    "If you buy the Robotics Colony Upgrade, you will gain the ability to purchase and use Robots to operate your factories as well. "
+    "However, you can never use more than one Robot per Colonist per Robotics upgrade. "
     "The three Era 3 factories can only be operated by Colonists, but those Colonists do not count against Colonist capacity.\n\n"
 
-    "At the beginning of each round, players are assigned turn order in descending number of victory points; face value of upgrades breaks ties.  "
-    "Each player draws one production card for each factory that was operated last turn, along with bonus production cards from Scientist and Orbital Lab upgrades.  "
+    "At the beginning of each round, players are assigned turn order in descending number of victory points; face value of upgrades breaks ties. "
+    "Each player draws one production card for each factory that was operated last turn, along with bonus production cards from Scientist and Orbital Lab upgrades. "
     "For Water, Titanium, and New Chemicals, if you have at least 4 factories of that type you may instead choose to draw a Mega card with a fixed value (30, 44, or 88, slightly "
-    "more than four times the average production).  These Mega cards still count as four cards for your hand limit.  Research and Microbiotics production cards do NOT count against your hand limit.  "
+    "more than four times the average production). These Mega cards still count as four cards for your hand limit. Research and Microbiotics production cards do NOT count against your hand limit. "
     "After that, any player over their Production capacity (their hand limit, which starts at 10 but can be raised by Warehouse and Outpost upgrades) must discard "
     "excess cards down to their hand limit.\n\n"
 
     "On their turn, a player chooses to auction zero or more upgrades; they declare an opening bid (at or above that upgrade's minimum bid) and "
-    "bidding proceeds around the table; each player can pass or raise the bid.  The auction ends when all other players pass after a bid, but "
-    "a player who passed earlier in the auction can re-bid again if they get a chance.  Winner pays for the auction by discarding production "
+    "bidding proceeds around the table; each player can pass or raise the bid. The auction ends when all other players pass after a bid, but "
+    "a player who passed earlier in the auction can re-bid again if they get a chance. Winner pays for the auction by discarding production "
     "cards from their hand, less any discounts, but no change is given.\n\n"
 
-    "Once a player cannot or chooses not to initiate any more auctions, they may now purchase factories, colonists, and robots.  "
-    "You pay for each type of item separately, but you can buy more than one of an item and pay only that total amount.  "
+    "Players can win auctions when it is not their turn; if the auction came with a free factory, they may immediately move an operator to staff it even if they already had their turn this round. "
+    "Players can win any number of auctions in a given round, if they can afford to pay for them. "
+    "Once a player cannot or chooses not to initiate any more auctions, they may now purchase factories, colonists, and robots. "
+    "You pay for each type of item separately, but you can buy more than one of an item and pay only that total amount. "
     "Finally you may allocate colonists (and robots, if available) to your factories.\n\n"
 
-    "Whenever you pay for something, you may always overpay but you will never get change back.  The computer will recommend the best set of cards that satisfies your debt.  "
+    "Whenever you pay for something, you may always overpay but you will never get change back. The computer will recommend the best set of cards that satisfies your debt. "
     "During auctions, the computer will tell you the minimum bid and the actual amount you can exactly pay, which is sometimes higher.\n\n"
 
-    "You can purchase Ore and Water factories at any time.  You can purchase Titanium factories if you own Heavy Equipment upgrade.  You can purchase Research "
-    "factories if you own Laboratory.  You can purchase New Chemicals factories only if at least one Research card is used to pay for each one (which means "
-    "that you must own either Scientists or Laboratory).  Microbiotics, Orbital Medicine, Ring Ore, and Moon Ore factories cannot be directly purchased, "
-    "but you receive one factory free with each matching Colony Upgrade.  As a special case on the first turn of the game, you may turn in all six of your original "
+    "You can purchase Ore and Water factories at any time. You can purchase Titanium factories if you own Heavy Equipment upgrade.  You can purchase Research "
+    "factories if you own Laboratory. You can purchase New Chemicals factories only if at least one Research card is used to pay for each one (which means "
+    "that you must own either Scientists or Laboratory). Microbiotics, Orbital Medicine, Ring Ore, and Moon Ore factories cannot be directly purchased, "
+    "but you receive one factory free with each matching Colony Upgrade. As a special case on the first turn of the game, you may turn in all six of your original "
     "production cards for one Water factory even if you couldn't otherwise afford one.\n\n"
     ;
     
@@ -506,14 +524,12 @@ struct player_t {
         unsigned vps = 0;
         // compute victory points for static upgrades
         for (int i=DATA_LIBRARY; i<UPGRADE_COUNT; i++) {
-            static const byte_t vpsForUpgrade[UPGRADE_COUNT] = { 1,1,1,2,2, 3,3,5,5,5, 0,0,0 };
             vps += vpsForUpgrade[i] * upgrades[i];
         }
         // now include victory points for factories which are manned
         // note that microbiotics is counted during upgrades and can never be manned.
         // scientists are counted during upgrades as well but you can also buy/man research factories so they're counted here.
         for (int i=ORE; i<PRODUCTION_COUNT; i++) {
-            static const byte_t vpsForMannedFactory[PRODUCTION_COUNT] = { 1,1,2,2,0,3,10,15,20 };
             vps += vpsForMannedFactory[i] * (mannedByColonists[i] + mannedByRobots[i]);
         }
         return vps;
@@ -1352,6 +1368,24 @@ int main() {
     unsigned seed = (unsigned) time(NULL);
 
     table << basicRules;
+
+    table.setLeftMargin(4);
+    table << "Upgrade Summary:\n";
+    for (int i=0; i<UPGRADE_COUNT; i++) {
+        table << upgradeNames[i] << ": Min bid " << upgradeCosts[i] << ", ";
+        if (vpsForUpgrade[i])
+            table << vpsForUpgrade[i] << "VPs; ";
+        table << upgradeHelp[i] << ".\n";
+    }
+    table << "\nFactory Summary:\n";
+    for (int i=0; i<PRODUCTION_COUNT; i++) {
+        table << factoryNames[i] << ": ";
+        if (factoryCosts[i])
+            table << "Cost " << factoryCosts[i] << ", " ;
+        table << vpsForMannedFactory[i] << " VPs when operated; " << factoryHelp[i] << ".\n";
+    }
+    table << "\n";
+    table.setLeftMargin(0);
     
     for (;;) {
         table << "Number of players?  (2-9) ";
