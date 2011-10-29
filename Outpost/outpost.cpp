@@ -1069,7 +1069,37 @@ void brain_t::moveOperatorToNewFactory(productionEnum_t dest) {
       
 }
 
-
+/*
+    Design thoughts for better AI:
+    - AI shouldn't cheat; it should use only public information.
+    - However, it can have perfect memory.
+    - You know the average amount somebody will have based on their hand.
+    - You can also know the least and most they may have.
+    - Mega cards and "average" virtual cards are public information as well.
+    - Discards are public information; that combined with known distributions and what you're holding can give you tighter bounds on your opponents.
+ 
+    - The long-term goal is to make lots of money and score lots of victory points.
+    - Era 1 purchases help dictate your mid-game strategy.
+    - Data Library makes Research more viable.
+    - Warehouse makes buying cheaper factories or saving up for bigger purchases earlier more viable.
+    - Heavy Equipment should be purchased early for maximum benefit.
+    - Nodule makes buying cheaper factories more viable.
+    - If you have Heavy Equipment, you don't need Scientists or Orbital Lab as badly.
+    - Scientists is always worth face value since Research factories must be manned and cost 30$.
+    - But Laboratory includes a free factory (so effectively 50$) and is worth 5VP on its own.
+    - Ecoplants is pretty cheap VP
+    - Outpost can easily have discount of 10-25$, and includes Titanium factory (30$); critical if you
+      didn't get Robotics
+    - Era 3 technologies are all good, but don't let somebody else get them too cheaply.
+ 
+    - Every upgrade has an expected value based on victory points and factory potential include; this
+      expected value is somewhat dependent on what other technologies you own.
+ 
+    - On last turn of game, any leftover cash should buy best factories possible assuming you can man them.
+    - If you have 20$, buy Ore + Operator (only 15$ if Ecoplants), or Water and shift operator from Ore
+    - If you have 40$, buy Titanium + Operator
+    - If you have 70$, buy New Chem + Operator
+ */
 class computerBrain_t: public brain_t {
     const game_t &game;
 public:
