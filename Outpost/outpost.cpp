@@ -11,6 +11,11 @@
 #include <stdlib.h>
 #include <time.h>
 
+#ifndef _WIN32
+#include <sys/ioctl.h>
+#include <unistd.h>
+#endif
+
 #include <string>
 #include <iostream>
 #include <vector>
@@ -22,10 +27,10 @@ using namespace std;
 
 class mystream_t {
     string buffer;
-    int column, leftMargin;
-    static const int margin = 79;
+    int column, leftMargin, rightMargin;
 public:
-    mystream_t() : column(0), leftMargin(0) { }
+    mystream_t() : column(0), leftMargin(0), rightMargin(79) { 
+    }
 
     void hadInput() { column = 0; }
 
@@ -36,6 +41,14 @@ public:
             cout << " ";
             ++column;
         }
+#ifndef _WIN32
+        // recheck terminal width after every line in case it's resized at runtime.
+        // could just do this on terminal input instead.
+        struct winsize w;
+        ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+        if (w.ws_col)
+            rightMargin = w.ws_col - 1;
+#endif
     }
     
     void setLeftMargin(int lm) { leftMargin = lm; }
@@ -45,14 +58,14 @@ public:
             char c = *s++;
             if (c == ' ' || c == '\n') {
                 if (buffer.size()) {
-                    if (column + buffer.size() > margin)
+                    if (column + buffer.size() > rightMargin)
                         wordbreak();
                     cout << buffer;
                     column += buffer.size();
                     buffer.clear();
                 }
                 if (c == ' ') {
-                    if (++column==margin)
+                    if (++column==rightMargin)
                         wordbreak();
                     else
                         cout << " ";
@@ -523,15 +536,13 @@ struct player_t {
     unsigned computeVictoryPoints() {
         unsigned vps = 0;
         // compute victory points for static upgrades
-        for (int i=DATA_LIBRARY; i<UPGRADE_COUNT; i++) {
+        for (int i=DATA_LIBRARY; i<UPGRADE_COUNT; i++)
             vps += vpsForUpgrade[i] * upgrades[i];
-        }
         // now include victory points for factories which are manned
         // note that microbiotics is counted during upgrades and can never be manned.
         // scientists are counted during upgrades as well but you can also buy/man research factories so they're counted here.
-        for (int i=ORE; i<PRODUCTION_COUNT; i++) {
+        for (int i=ORE; i<PRODUCTION_COUNT; i++)
             vps += vpsForMannedFactory[i] * (mannedByColonists[i] + mannedByRobots[i]);
-        }
         return vps;
     }
 
@@ -800,8 +811,24 @@ public:
     }
     
     void displayPlayerOrder() {
-        for (playerIndex_t i=0; i<playerOrder.size(); i++)
-            table << players[playerOrder[i].selfIndex].getName() << " is Player " << i+1 << " this round (" << playerOrder[i].vps << " VPs).\n";
+        for (playerIndex_t pi=0; pi<playerOrder.size(); pi++) {
+            player_t &p = players[playerOrder[pi].selfIndex];
+            table << "#" << pi+1 << ". " << p.getName() << "; " << playerOrder[pi].vps << " VPs, upgrades: ";
+            bool anyUpgrades = false;
+            for (int i=DATA_LIBRARY; i<UPGRADE_COUNT; i++)
+                if (p.upgrades[i]) {
+                    table << " " << int(p.upgrades[i]) << "/" << upgradeNames[i] << ";";
+                    anyUpgrades = true;
+                }
+            if (!anyUpgrades)
+                table << "[none];";
+            table << " factories:";
+            for (int i=ORE; i<PRODUCTION_COUNT; i++)
+                if (p.factories[i])
+                    table << " " << int(p.factories[i]) << "/" << factoryNames[i] << "(" << int(p.mannedByColonists[i]) << "+" << int(p.mannedByRobots[i]) << ");";
+            table << " Unused(" << int(p.mannedByColonists[PRODUCTION_COUNT]) << "+" << int(p.mannedByRobots[PRODUCTION_COUNT]) << ");\n";
+        }
+            
     }
 
     void replaceUpgradeCards() {
@@ -936,9 +963,7 @@ public:
             return false;
         
         table << "Game over, final rankings:\n";
-        for (playerIndex_t i=0; i<playerOrder.size(); i++) {
-            table << "#" << i+1 <<". " << players[playerOrder[i].selfIndex].getName() << ", with " << playerOrder[i].vps << " and " << playerOrder[i].totalUpgradeCosts << " upgrade value.\n";
-        }        
+        displayPlayerOrder();
         return true;
     }
 };
