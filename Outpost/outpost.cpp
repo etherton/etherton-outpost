@@ -28,17 +28,20 @@ using namespace std;
 class mystream_t {
     string buffer;
     int column, leftMargin, rightMargin;
+    ostream *sink;
 public:
-    mystream_t() : column(0), leftMargin(0), rightMargin(79) { 
+    mystream_t() : column(0), leftMargin(0), rightMargin(79), sink(0) { 
     }
-
+    
+    void setStream(ostream *s) { sink = s; }
+    
     void hadInput() { column = 0; }
 
     void wordbreak() {
-        cout << "\n";
+        if (sink) *sink << "\n";
         column = 0;
         while (column < leftMargin) {
-            cout << " ";
+            if (sink) *sink << " ";
             ++column;
         }
 #ifndef _WIN32
@@ -60,7 +63,7 @@ public:
                 if (buffer.size()) {
                     if (column + buffer.size() > rightMargin)
                         wordbreak();
-                    cout << buffer;
+                    if (sink) *sink << buffer;
                     column += buffer.size();
                     buffer.clear();
                 }
@@ -68,10 +71,10 @@ public:
                     if (++column==rightMargin)
                         wordbreak();
                     else
-                        cout << " ";
+                        if (sink) *sink << " ";
                 }
                 else {
-                    cout << "\n";
+                    if (sink) *sink << "\n";
                     column = 0;
                 }
             }
@@ -98,7 +101,7 @@ public:
     mystream_t &operator<<(const string& s) { return operator<<(s.c_str()); }
 };
 
-mystream_t table;
+mystream_t table, debug;
 
 
 typedef unsigned char byte_t;
@@ -355,6 +358,7 @@ public:
 
     virtual amt_t wantMega(productionEnum_t which,amt_t maxMega) = 0;
     virtual cardIndex_t pickDiscard(vector<card_t> &hand) = 0;
+    virtual void yourTurn() { }
     virtual cardIndex_t pickCardToAuction(vector<card_t> &hand,vector<upgradeEnum_t> &upgradeMarket,money_t &bid) = 0;
     virtual money_t raiseOrPass(vector<card_t> &hand,upgradeEnum_t upgrade,money_t bid) = 0;
     virtual money_t payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minimumResearchCards); // returns actual amount paid which may be higher
@@ -568,6 +572,10 @@ struct player_t {
     
     void payFor(money_t cost,bank_t &bank,int minResearchCards) {
         brain->payFor(cost,hand,bank,minResearchCards);
+    }
+    
+    void yourTurn() {
+        brain->yourTurn();
     }
     
     cardIndex_t pickCardToAuction(vector<upgradeEnum_t> &upgradeMarket,money_t &bid) {
@@ -906,7 +914,7 @@ public:
                 anyUpgradesRemaining = true;
             }
         if (!anyUpgradesRemaining)
-            table << "[ none ]";
+            table << " [none]";
         table << "\n";
     }
 
@@ -973,6 +981,7 @@ public:
     void performPlayerTurns(bool firstTurn) {
         for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
             table << "\n=== " << players[i->selfIndex].getName() << "'s turn ===\n\n";
+            players[i->selfIndex].yourTurn();
             auctionUpgradeCards(i->selfIndex);
             players[i->selfIndex].purchaseFactories(firstTurn,bank);
             players[i->selfIndex].purchaseAndAssignPersonnel(bank);
@@ -1020,10 +1029,8 @@ void brain_t::assignPersonnel() {
 money_t brain_t::payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minResearchCards) {
     size_t best;
     
-    // DEBUG CODE
     // cout << name << " needs to pay at least " << cost << " (of " << player->getTotalCredits() << ") from:\n\t";
     // displayProductionCardsOnSingleLine(hand);
-    // END DEBUG CODE
     
     money_t paid = findBestCards(cost,hand,minResearchCards,&best);
     cardIndex_t base = 0;
@@ -1149,6 +1156,7 @@ void brain_t::moveOperatorToNewFactory(productionEnum_t dest) {
  */
 class computerBrain_t: public brain_t {
     const game_t &game;
+    int lastFactory;
 public:
     computerBrain_t(string name,const game_t &theGame) : brain_t(name), game(theGame) { } 
     amt_t wantMega(productionEnum_t,amt_t maxMega) { 
@@ -1162,6 +1170,10 @@ public:
         // Just pick the cheapest card we have.  (cards are always in sorted order)
         // Note that we could end up discarding a research card we needed to buy research factory!
         return 0;
+    }
+    void yourTurn() {
+        // reset variable remembering highest factory we purchased
+        lastFactory = NEW_CHEMICALS+1;
     }
     cardIndex_t pickCardToAuction(vector<card_t> &hand,vector<upgradeEnum_t> &upgradeMarket,money_t &bid) {
         // figure out which things we can actually afford.
@@ -1194,22 +1206,40 @@ public:
         else    // find the closest match
             return findBestCards(minBid - discount,hand,0,0) + discount;
     }
+    amt_t adjustAmountIfBigMoney(money_t each,amt_t maxAllowed,amt_t actualWanted,amt_t minResearchCards = 0) {
+        money_t expectedSpent = each * actualWanted;
+        money_t actualSpent = findBestCards(expectedSpent,player->hand,minResearchCards,NULL);
+        // If we're wasting enough money that we would have gotten something free, try adjusting the amount.
+        while (actualSpent - expectedSpent >= each && actualWanted < maxAllowed) {
+            expectedSpent += each;
+            ++actualWanted;
+            debug << name << " can afford an extra thing based on cash in hand.\n";
+        }
+        // Finally, don't buy anything if we're wasting more than half the purchase price
+        if (actualSpent - expectedSpent > (actualSpent>>1)) {
+            debug << name << " decides not to buy any after all based on cash in hand.\n";
+            actualWanted = 0;
+        }
+        return actualWanted;
+    }
     amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) {
         // need more smarts here... shouldn't keep buying factories that we have no hope of staffing.
-        for (int i=NEW_CHEMICALS; i>ORE; i--)
-            if (maxByType[i] && player->factories[i] < player->mannedByColonists[i] + player->mannedByRobots[i] + 2) {
-                whichFactory = (productionEnum_t)i;
-                return (maxByType[i] + 1) / 2;
+        while (lastFactory != ORE) {
+            --lastFactory;
+            if (maxByType[lastFactory] && player->factories[lastFactory] < player->mannedByColonists[lastFactory] + player->mannedByRobots[lastFactory] + 2) {
+                whichFactory = (productionEnum_t)lastFactory;
+                return adjustAmountIfBigMoney(factoryCosts[lastFactory],maxByType[lastFactory],(maxByType[lastFactory] + 1) / 2,lastFactory==NEW_CHEMICALS?maxByType[lastFactory]:0);
             }
+        }
         return 0;
     }
     amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) {
         // don't buy colonists if we already have some we haven't used yet.
-        return (player->mannedByColonists[PRODUCTION_COUNT])? 0 : (maxAllowed+1)/2;
+        return (player->mannedByColonists[PRODUCTION_COUNT])? 0 : adjustAmountIfBigMoney(perColonist,maxAllowed,(maxAllowed+1)/2);
     }
     amt_t purchaseRobots(money_t perRobot,amt_t maxAllowed,amt_t maxUsable) {
         // don't buy robots if we already have some we haven't used yet.
-        return (player->mannedByRobots[PRODUCTION_COUNT])? 0 : (maxAllowed+1)/2;
+        return (player->mannedByRobots[PRODUCTION_COUNT])? 0 : adjustAmountIfBigMoney(perRobot,maxAllowed,(maxAllowed+1)/2);
     }
 };
 
@@ -1443,6 +1473,7 @@ int main() {
     // seed the RNG, but let it be overridden from user input
     unsigned seed = (unsigned) time(NULL);
 
+    table.setStream(&cout);
     table << basicRules;
 
     table.setLeftMargin(4);
