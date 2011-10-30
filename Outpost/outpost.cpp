@@ -24,33 +24,36 @@
 using namespace std;
 
 #define active table
+#define debug table
+
+int debugLevel = 0;
 
 class mystream_t {
     string buffer;
     int column, leftMargin, rightMargin;
-    ostream *sink;
 public:
-    mystream_t() : column(0), leftMargin(0), rightMargin(79), sink(0) { 
+    mystream_t() : column(0), leftMargin(0), rightMargin(80) { 
     }
-    
-    void setStream(ostream *s) { sink = s; }
     
     void hadInput() { column = 0; }
 
+    void output(const char *s) { 
+        cout << s;
+    }
+    
     void wordbreak() {
-        if (sink) *sink << "\n";
+        output("\n");
         column = 0;
         while (column < leftMargin) {
-            if (sink) *sink << " ";
+            output(" ");
             ++column;
         }
 #ifndef _WIN32
         // recheck terminal width after every line in case it's resized at runtime.
         // could just do this on terminal input instead.
         struct winsize w;
-        ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-        if (w.ws_col)
-            rightMargin = w.ws_col - 1;
+        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) >= 0 && w.ws_col)
+            rightMargin = w.ws_col;
 #endif
     }
     
@@ -61,20 +64,20 @@ public:
             char c = *s++;
             if (c == ' ' || c == '\n') {
                 if (buffer.size()) {
-                    if (column + buffer.size() > rightMargin)
+                    if (column + buffer.size() >= rightMargin)
                         wordbreak();
-                    if (sink) *sink << buffer;
+                    output(buffer.c_str());
                     column += buffer.size();
                     buffer.clear();
                 }
                 if (c == ' ') {
-                    if (column++==rightMargin)
+                    if (++column==rightMargin)
                         wordbreak();
                     else
-                        if (sink) *sink << " ";
+                        output(" ");
                 }
                 else {
-                    if (sink) *sink << "\n";
+                    output("\n");
                     column = 0;
                 }
             }
@@ -101,12 +104,12 @@ public:
     mystream_t &operator<<(const string& s) { return operator<<(s.c_str()); }
 };
 
-mystream_t table, debug;
+mystream_t table;
 
 
 typedef unsigned char byte_t;
 
-enum productionEnum_t { ORE, WATER, TITANIUM, RESEARCH, MICROBIOTICS, NEW_CHEMICALS, ORBITAL_MEDICINE, RING_ORE, MOON_ORE, PRODUCTION_COUNT };
+enum productionEnum_t { ORE, WATER, TITANIUM, RESEARCH, MICROBIOTICS, NEW_CHEMICALS, ORBITAL_MEDICINE, RING_ORE, MOON_ORE, PRODUCTION_COUNT, UNUSED=PRODUCTION_COUNT };
 
 const char *factoryNames[PRODUCTION_COUNT] = { "Ore", "Water", "Titanium", "Research", "Microbiotics", "NewChemicals", "OrbitalMedicine", "RingOre", "MoonOre" };
 
@@ -520,7 +523,7 @@ struct player_t {
             colonistLimit += 3;
         else if (upgrade == ROBOTICS) {
             robots++;
-            mannedByRobots[PRODUCTION_COUNT]++;
+            mannedByRobots[UNUSED]++;
         }
         else if (upgrade == LABORATORY)
             newFactoryFromUpgrade(RESEARCH);
@@ -624,7 +627,7 @@ struct player_t {
             if (purchased) {
                 table << getName() << " bought " << purchased << " colonist" << (purchased>1?"s":"") << ".\n";
                 colonists += purchased;
-                mannedByColonists[PRODUCTION_COUNT] += purchased;
+                mannedByColonists[UNUSED] += purchased;
                 payFor(purchased * price,bank,0);
             }
         }
@@ -637,7 +640,7 @@ struct player_t {
             if (purchased) {
                 table << getName() << " bought " << purchased << " robot" << (purchased>1?"s":"") << ".\n";
                 robots += purchased;
-                mannedByRobots[PRODUCTION_COUNT] += purchased;
+                mannedByRobots[UNUSED] += purchased;
                 payFor(purchased * price,bank,0);
             }
         }        
@@ -656,7 +659,7 @@ struct player_t {
         for (int i=ORE; i<PRODUCTION_COUNT; i++)
             if (factories[i])
                 table << " " << int(factories[i]) << "/" << factoryNames[i] << "(" << int(mannedByColonists[i]) << "+" << int(mannedByRobots[i]) << ");";
-        table << " Unused(" << int(mannedByColonists[PRODUCTION_COUNT]) << "+" << int(mannedByRobots[PRODUCTION_COUNT]) << ");\n";
+        table << " Unused(" << int(mannedByColonists[UNUSED]) << "+" << int(mannedByRobots[UNUSED]) << ");\n";
     }
     
     const string& getName() const { return brain->getName(); }
@@ -847,7 +850,7 @@ public:
             for (int i=ORE; i<PRODUCTION_COUNT; i++)
                 if (p.factories[i])
                     table << " " << int(p.factories[i]) << "/" << factoryNames[i] << "(" << int(p.mannedByColonists[i]) << "+" << int(p.mannedByRobots[i]) << ");";
-            table << " Unused(" << int(p.mannedByColonists[PRODUCTION_COUNT]) << "+" << int(p.mannedByRobots[PRODUCTION_COUNT]) << "); ";
+            table << " Unused(" << int(p.mannedByColonists[UNUSED]) << "+" << int(p.mannedByRobots[UNUSED]) << "); ";
             int minPos, maxPos;
             p.getExpectedMoneyInHand(minPos, maxPos);
             if (minPos == maxPos)
@@ -993,7 +996,7 @@ public:
         if (playerOrder.front().vps < 75)
             return false;
         
-        table << "Game over, final rankings:\n";
+        table << "\n\n=== GAME OVER ===\n\nFinal rankings:\n";
         displayPlayerOrder();
         return true;
     }
@@ -1004,23 +1007,23 @@ void brain_t::assignPersonnel() {
     
     // everybody outta the pool!
     for (int i=ORE; i<PRODUCTION_COUNT; i++) {
-        player->mannedByColonists[PRODUCTION_COUNT] += player->mannedByColonists[i];
+        player->mannedByColonists[UNUSED] += player->mannedByColonists[i];
         player->mannedByColonists[i] = 0;
-        player->mannedByRobots[PRODUCTION_COUNT] += player->mannedByRobots[i];
+        player->mannedByRobots[UNUSED] += player->mannedByRobots[i];
         player->mannedByRobots[i] = 0;
     }
     // assign to factories from the top down, favoring humans first
     for (int i=MOON_ORE; i>=ORE; i--) {
-        while (player->mannedByColonists[i] < player->factories[i] && player->mannedByColonists[PRODUCTION_COUNT]) {
+        while (player->mannedByColonists[i] < player->factories[i] && player->mannedByColonists[UNUSED]) {
             player->mannedByColonists[i]++;
-            player->mannedByColonists[PRODUCTION_COUNT]--;
+            player->mannedByColonists[UNUSED]--;
         }
     }
     // fill in anything remaining with robots but only up to the limit
     for (int i=ORBITAL_MEDICINE; i>=ORE && robotLimit; i--) {
-        while (robotLimit && (player->mannedByColonists[i] + player->mannedByRobots[i]) < player->factories[i] && player->mannedByRobots[PRODUCTION_COUNT]) {
+        while (robotLimit && (player->mannedByColonists[i] + player->mannedByRobots[i]) < player->factories[i] && player->mannedByRobots[UNUSED]) {
             player->mannedByRobots[i]++;
-            player->mannedByRobots[PRODUCTION_COUNT]--;
+            player->mannedByRobots[UNUSED]--;
             --robotLimit;
         }
     }
@@ -1028,9 +1031,11 @@ void brain_t::assignPersonnel() {
 
 money_t brain_t::payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minResearchCards) {
     size_t best;
-    
-    // cout << name << " needs to pay at least " << cost << " (of " << player->getTotalCredits() << ") from:\n\t";
-    // displayProductionCardsOnSingleLine(hand);
+
+    if (debugLevel > 0) {
+        cout << name << " needs to pay at least " << cost << " (of " << player->getTotalCredits() << ") from:\n\t";
+        displayProductionCardsOnSingleLine(hand);
+    }
     
     money_t paid = findBestCards(cost,hand,minResearchCards,&best);
     cardIndex_t base = 0;
@@ -1091,15 +1096,15 @@ money_t brain_t::findBestCards(money_t cost,vector<card_t> &hand,amt_t minResear
 void brain_t::moveOperatorToNewFactory(productionEnum_t dest) {
     bool robotCanOperate = (dest < ORBITAL_MEDICINE);
     // always choose an unused colonist first
-    if (player->mannedByColonists[PRODUCTION_COUNT]) {
+    if (player->mannedByColonists[UNUSED]) {
         table << name << " moves an unused colonist to operate the new " << factoryNames[dest] << ".\n";
-        player->mannedByColonists[PRODUCTION_COUNT]--;
+        player->mannedByColonists[UNUSED]--;
         player->mannedByColonists[dest]++;
     }
     // next choose an unused robot, but only if we're not at the limit yet and the robot can work there.
-    else if (player->mannedByRobots[PRODUCTION_COUNT] && player->getRobotsInUse() < player->getRobotLimit() && robotCanOperate) {
+    else if (player->mannedByRobots[UNUSED] && player->getRobotsInUse() < player->getRobotLimit() && robotCanOperate) {
         table << name << " moves an unused robot to operate the new " << factoryNames[dest] << ".\n";
-        player->mannedByRobots[PRODUCTION_COUNT]--;
+        player->mannedByRobots[UNUSED]--;
         player->mannedByRobots[dest]++;
     }
     else {
@@ -1213,11 +1218,13 @@ public:
         while (actualSpent - expectedSpent >= each && actualWanted < maxAllowed) {
             expectedSpent += each;
             ++actualWanted;
-            debug << name << " can afford an extra thing based on cash in hand.\n";
+            if (debugLevel > 0)
+                debug << name << " can afford an extra thing based on cash in hand.\n";
         }
         // Finally, don't buy anything if we're wasting more than half the purchase price
         if (actualSpent - expectedSpent > (actualSpent>>1)) {
-            debug << name << " decides not to buy any after all based on cash in hand.\n";
+            if (debugLevel > 0)
+                debug << name << " decides not to buy any after all based on cash in hand.\n";
             actualWanted = 0;
         }
         return actualWanted;
@@ -1235,11 +1242,11 @@ public:
     }
     amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) {
         // don't buy colonists if we already have some we haven't used yet.
-        return (player->mannedByColonists[PRODUCTION_COUNT])? 0 : adjustAmountIfBigMoney(perColonist,maxAllowed,(maxAllowed+1)/2);
+        return (player->mannedByColonists[UNUSED])? 0 : adjustAmountIfBigMoney(perColonist,maxAllowed,(maxAllowed+1)/2);
     }
     amt_t purchaseRobots(money_t perRobot,amt_t maxAllowed,amt_t maxUsable) {
         // don't buy robots if we already have some we haven't used yet.
-        return (player->mannedByRobots[PRODUCTION_COUNT])? 0 : adjustAmountIfBigMoney(perRobot,maxAllowed,(maxAllowed+1)/2);
+        return (player->mannedByRobots[UNUSED])? 0 : adjustAmountIfBigMoney(perRobot,maxAllowed,(maxAllowed+1)/2);
     }
 };
 
@@ -1423,7 +1430,7 @@ public:
                 if (player->factories[i])
                     active << i << ". " << factoryNames[i] << ": " << int(player->factories[i]) << " factories manned by " << int(player->mannedByColonists[i]) << " colonists and " << int(player->mannedByRobots[i]) << " robots.\n";
             }
-            active << PRODUCTION_COUNT << ". Unallocated: " << int(player->mannedByColonists[PRODUCTION_COUNT]) << " colonists, " << int(player->mannedByRobots[PRODUCTION_COUNT]) << " robots (max allocated is " << robotLimit << ").\n";
+            active << UNUSED << ". Unallocated: " << int(player->mannedByColonists[UNUSED]) << " colonists, " << int(player->mannedByRobots[UNUSED]) << " robots (max allocated is " << robotLimit << ").\n";
             active << "Transfer colonist (c), robot (r), or anything else to finish? ";
             char cmd = readLetter();
             if (cmd != 'C' && cmd != 'R')
@@ -1431,7 +1438,7 @@ public:
             vector<byte_t> &manned = (cmd == 'C')? player->mannedByColonists : player->mannedByRobots;
             active << "Transfer source? ";
             productionEnum_t src = (productionEnum_t)readUnsigned();
-            if (src > PRODUCTION_COUNT || !manned[src]) {
+            if (src > UNUSED || !manned[src]) {
                 active << "Sorry, that is an invalid or empty transfer source.\n";
                 continue;
             }
@@ -1443,11 +1450,11 @@ public:
             }
             active << "Transfer destination? ";
             productionEnum_t dst = (productionEnum_t)readUnsigned();
-            if (dst > PRODUCTION_COUNT || (dst != PRODUCTION_COUNT && player->factories[dst] < player->mannedByColonists[dst] + player->mannedByRobots[dst] + xferAmt)) {
+            if (dst > UNUSED || (dst != UNUSED && player->factories[dst] < player->mannedByColonists[dst] + player->mannedByRobots[dst] + xferAmt)) {
                 active << "Sorry, that is an invalid transfer destination or there isn't enough room there.\n";
                 continue;
             }
-            else if (dst != PRODUCTION_COUNT && src == PRODUCTION_COUNT && cmd == 'R' && robotsInUse + xferAmt > robotLimit) {
+            else if (dst != UNUSED && src == UNUSED && cmd == 'R' && robotsInUse + xferAmt > robotLimit) {
                 active << "Sorry, that would place you over your robot limit of " << robotLimit << ".\n";
                 continue;
             }
@@ -1467,33 +1474,38 @@ public:
 };
 
 
-int main() {
+int main(int argc,char **argv) {
     unsigned playerCount;
 
     // seed the RNG, but let it be overridden from user input
     unsigned seed = (unsigned) time(NULL);
 
-    table.setStream(&cout);
-    table << basicRules;
-
-    table.setLeftMargin(4);
-    table << "Upgrade Summary:\n";
-    for (int i=0; i<UPGRADE_COUNT; i++) {
-        table << upgradeNames[i] << ": Min bid " << upgradeCosts[i] << ", ";
-        if (vpsForUpgrade[i])
-            table << vpsForUpgrade[i] << "VPs; ";
-        table << upgradeHelp[i] << ".\n";
-    }
-    table << "\nFactory Summary:\n";
-    for (int i=0; i<PRODUCTION_COUNT; i++) {
-        table << factoryNames[i] << ": ";
-        if (factoryCosts[i])
-            table << "Cost " << factoryCosts[i] << ", " ;
-        table << vpsForMannedFactory[i] << " VPs when operated; " << factoryHelp[i] << ".\n";
-    }
-    table << "\n";
-    table.setLeftMargin(0);
+    if (argc > 1 && !strncmp(argv[1],"-d",2))
+        debugLevel = atoi(argv[1]+2);
     
+    // display rules if no parameters on command line
+    if (argc == 1) {
+        table << basicRules;
+
+        table.setLeftMargin(4);
+        table << "Upgrade Summary:\n";
+        for (int i=0; i<UPGRADE_COUNT; i++) {
+            table << upgradeNames[i] << ": Min bid " << upgradeCosts[i] << ", ";
+            if (vpsForUpgrade[i])
+                table << vpsForUpgrade[i] << "VPs; ";
+            table << upgradeHelp[i] << ".\n";
+        }
+        table << "\nFactory Summary:\n";
+        for (int i=0; i<PRODUCTION_COUNT; i++) {
+            table << factoryNames[i] << ": ";
+            if (factoryCosts[i])
+                table << "Cost " << factoryCosts[i] << ", " ;
+            table << vpsForMannedFactory[i] << " VPs when operated; " << factoryHelp[i] << ".\n";
+        }
+        table << "\n";
+        table.setLeftMargin(0);
+    }
+        
     for (;;) {
         table << "Number of players?  (2-9) ";
         playerCount = readUnsigned();
