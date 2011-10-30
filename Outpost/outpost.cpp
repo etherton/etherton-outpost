@@ -668,6 +668,20 @@ struct player_t {
     
     money_t getTotalUpgradeCosts() const { return totalUpgradeCosts; }
     
+    void getExpectedMoneyInHand(int &minPossible,int &maxPossible) const {
+        static const byte_t minPerCard[PRODUCTION_COUNT] = { 1,4,7,9,14,14,20,30,40 };
+        static const byte_t maxPerCard[PRODUCTION_COUNT] = { 5,10,13,17,20,26,40,50,60 };
+        
+        minPossible = 0;
+        maxPossible = 0;
+        for (vector<card_t>::const_iterator c=hand.begin(); c!=hand.end(); c++) {
+            // if it's returned to discard we cannot know what it may be.
+            // if it's not returned to discard it's an "average" card or mega card, either way we know its exact value
+            minPossible += c->returnToDiscard? minPerCard[c->prodType] : c->value;
+            maxPossible += c->returnToDiscard? maxPerCard[c->prodType] : c->value;
+        }
+    }
+    
     void dump() {
         cout << "player " << brain->getName() << ", " << int(colonists) << "/" << int(colonistLimit) << " colonists, " << int(productionSize) << "/" << int(productionLimit) << " cards\n\tfactories: ";
         for (int i=ORE; i<PRODUCTION_COUNT; i++)
@@ -680,7 +694,6 @@ struct player_t {
         cout << "(" << totalCredits << "$ total)\n";
     }
 };
-
 
 class game_t {
     vector<productionDeck_t> bank;
@@ -813,7 +826,7 @@ public:
     void displayPlayerOrder() {
         for (playerIndex_t pi=0; pi<playerOrder.size(); pi++) {
             player_t &p = players[playerOrder[pi].selfIndex];
-            table << "#" << pi+1 << ". " << p.getName() << "; " << playerOrder[pi].vps << " VPs, upgrades: ";
+            table << "#" << pi+1 << ". " << p.getName() << "; " << playerOrder[pi].vps << " VPs, upgrades:";
             bool anyUpgrades = false;
             for (int i=DATA_LIBRARY; i<UPGRADE_COUNT; i++)
                 if (p.upgrades[i]) {
@@ -821,13 +834,19 @@ public:
                     anyUpgrades = true;
                 }
             if (!anyUpgrades)
-                table << "[none];";
+                table << " [none];";
             table << " factories:";
             for (int i=ORE; i<PRODUCTION_COUNT; i++)
                 if (p.factories[i])
                     table << " " << int(p.factories[i]) << "/" << factoryNames[i] << "(" << int(p.mannedByColonists[i]) << "+" << int(p.mannedByRobots[i]) << ");";
-            table << " Unused(" << int(p.mannedByColonists[PRODUCTION_COUNT]) << "+" << int(p.mannedByRobots[PRODUCTION_COUNT]) << ");\n";
-        }
+            table << " Unused(" << int(p.mannedByColonists[PRODUCTION_COUNT]) << "+" << int(p.mannedByRobots[PRODUCTION_COUNT]) << "); ";
+            int minPos, maxPos;
+            p.getExpectedMoneyInHand(minPos, maxPos);
+            if (minPos == maxPos)
+                table << "exactly " << minPos << "$ in hand.\n";
+            else
+                table << minPos << "-" << maxPos << "$ in hand.\n";
+         }
             
     }
 
@@ -910,6 +929,7 @@ public:
             table << "There is 1 card available for auction.\n";
         else
             table << "There are " << upgradeMarket.size() << " cards available for auction.\n"; */
+        displayPlayerOrder();
         while (upgradeMarket.size() && (nextAuction = players[selfIndex].pickCardToAuction(upgradeMarket,bid)) != upgradeMarket.size()) {
             // remove the card from the market
             upgradeEnum_t upgrade = upgradeMarket[nextAuction];
@@ -945,6 +965,8 @@ public:
             if (bid > discount)
                 players[highBidder].payFor(bid - discount,bank,0);
             players[highBidder].addUpgrade(upgrade);
+            
+            displayPlayerOrder();
         }
     }
 
@@ -1217,7 +1239,6 @@ public:
         return which;
     }
     cardIndex_t pickCardToAuction(vector<card_t> &hand,vector<upgradeEnum_t> &upgradeMarket,money_t &bid) {
-        player->displayHoldings();
         for (;;) {
             for (cardIndex_t i=0; i<upgradeMarket.size(); i++)
                 active << i << ". " << upgradeNames[upgradeMarket[i]] << " (min bid is " << int(upgradeCosts[upgradeMarket[i]]) << ")\n";
