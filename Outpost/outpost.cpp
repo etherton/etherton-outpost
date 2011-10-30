@@ -68,7 +68,7 @@ public:
                     buffer.clear();
                 }
                 if (c == ' ') {
-                    if (++column==rightMargin)
+                    if (column++==rightMargin)
                         wordbreak();
                     else
                         if (sink) *sink << " ";
