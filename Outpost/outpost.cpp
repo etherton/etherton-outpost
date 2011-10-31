@@ -1277,8 +1277,13 @@ public:
     }
     cardIndex_t pickCardToAuction(vector<card_t> &hand,vector<upgradeEnum_t> &upgradeMarket,money_t &bid) {
         for (;;) {
-            for (cardIndex_t i=0; i<upgradeMarket.size(); i++)
-                active << i << ". " << upgradeNames[upgradeMarket[i]] << " (min bid is " << int(upgradeCosts[upgradeMarket[i]]) << ")\n";
+            for (cardIndex_t i=0; i<upgradeMarket.size(); i++) {
+                active << i << ". " << upgradeNames[upgradeMarket[i]] << " (min bid is " << int(upgradeCosts[upgradeMarket[i]]);
+                int discount = player->computeDiscount(upgradeMarket[i]);
+                if (discount)
+                    active << ", your discount is " << discount;
+                active << ")\n";
+            }
             displayProductionCardsOnSingleLine(hand);
             active << name << ", pick a card to auction or empty line for none? (you have " << player->getTotalCredits() << ") ";
             for (;;) {
