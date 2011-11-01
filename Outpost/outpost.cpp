@@ -1057,34 +1057,35 @@ money_t brain_t::findBestCards(money_t cost,vector<card_t> &hand,amt_t minResear
     // i doubt a hand size of more than 31 cards is really possible.
     // note this code could get pretty slow for bigger hands though since it's exhaustive.
     size_t width = hand.size();
+    if (width > 25)
+        width = 25;     // keep this from taking a very long time
     size_t handMax = 1U << width;
+    size_t bestCards = width;     // best cards is the entire hand.
     size_t best = handMax - 1;    // best match is the entire hand.
     amt_t bestValue = player->getTotalCredits();  // best value is the entire hand.
     // don't waste time if it's an exact match
     if (bestValue > cost) {
         for (unsigned i=1; i<handMax; i++) {
             unsigned test = i;
-            amt_t testValue = 0, testResearchCount = 0;
+            amt_t testValue = 0, testResearchCount = 0, testMinValue = 0;
+            size_t testCards = 0;
             // determine the value of this permutation, and remember how many cards there were.
             for (unsigned j=0; j<width; j++,test>>=1) {
                 if (test & 1) {
+                    if (!testMinValue)
+                        testMinValue = hand[j].value;
                     testValue += hand[j].value;
                     testResearchCount += hand[j].prodType == RESEARCH;
+                    testCards += hand[j].handSize;
                 }
             }
-            // if we got an exact match, we can stop looking
-            // since cards are sorted by increasing value we will get rid of as many cards as possible
-            if (testValue == cost && testResearchCount >= minResearchCards) {
-                best = i;
-                bestValue = testValue;
-                break;
-            }
             // if this is better than our previous best guess, remember it.
-            // note that since the deck is sorted by least to most we'll tend to favor ditching more
-            // cheaper cards all other things considered equally
-            else if (testValue > cost && testValue < bestValue && testResearchCount >= minResearchCards) {
+            // also attempt to maximize the number of cards we'd be discarding.
+            // but don't throw out cards just for the sake of tossing them
+            if (testValue >= cost && testValue - testCards < bestValue - bestCards && testValue - testMinValue < cost && testResearchCount >= minResearchCards) {
                 best = i;
                 bestValue = testValue;
+                bestCards = testCards;
             }
         }
     }
@@ -1377,6 +1378,7 @@ public:
             for (int i=ORE; i<=NEW_CHEMICALS; i++)
                 if (maxByType[i])
                     active << i << ". " << factoryNames[i] << " (at most " << int(maxByType[i]) << ", you have " << int(player->factories[i]) << ")" << "\n";
+            displayProductionCardsOnSingleLine(player->hand);
             active << name << ", which factory would you like to purchase? (default is none) ";
             whichFactory = (productionEnum_t) readUnsigned();
             if (whichFactory == EMPTY)
