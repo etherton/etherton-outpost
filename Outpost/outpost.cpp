@@ -5,8 +5,11 @@
     Commercial use prohibited.  If you like the game, buy a copy of it from www.strongholdgames.com!
  
     Source code Copyright 2011, David C. Etherton.  All Rights Reserved.
+ 
+    Thanks to Kevin Brown (plight on BGG) for early feedback and advice.
 */
 
+#include <assert.h>
 #include <ctype.h>
 #include <stdlib.h>
 #include <time.h>
@@ -104,7 +107,33 @@ public:
     mystream_t &operator<<(const string& s) { return operator<<(s.c_str()); }
 };
 
+template <class _Type,size_t count> class fixedvector {
+public:
+    _Type& operator[](size_t i) {
+        assert(i < count);
+        return array[i];
+    }
+    const _Type& operator[](size_t i) const {
+        assert(i < count);
+        return array[i];
+    }
+    _Type* begin() { return array; }
+    _Type* end() { return array + count; }
+    void fill(_Type t) { fill_n(begin(), count, t); }
+private:
+    _Type array[count];
+};
+
 mystream_t table;
+
+enum turnphase_t {
+    AUCTION_BEFORE_MY_TURN,
+    AUCTION_MY_TURN,
+    AUCTION_AFTER_MY_TURN,
+    BUYING_FACTORIES,
+    BUYING_COLONISTS,
+    BUYING_ROBOTS
+};
 
 
 typedef unsigned char byte_t;
@@ -150,6 +179,10 @@ const char *upgradeNames[UPGRADE_COUNT] = { "DataLibrary", "Warehouse", "HeavyEq
     "Laboratory", "Ecoplants", "Outpost", "SpaceStation", "PlanetaryCruiser", "MoonBase" };
 
 static const byte_t vpsForUpgrade[UPGRADE_COUNT] = { 1,1,1,2,2, 3,3,5,5,5, 0,0,0 };
+
+// This is used by AI to just potential VP swing for an upgrade.  Assumes any included factory will be manned.
+// This is why the entries for LABORATORY, OUTPOST, and the era 3 upgrades are higher than the values in vpsForUpgrade.
+static const byte_t potentialVpsForUpgrade[UPGRADE_COUNT] = { 1,1,1,2,2,3,3,7,5,7,10,15,20 };
 
 const char *upgradeHelp[UPGRADE_COUNT] = {
     "10$ discount/Scientists, 10$ discount/Laboratory",
@@ -263,6 +296,7 @@ class productionDeck_t {
     typedef vector<byte_t>::iterator deckIt_t;
     vector<byte_t> discards;
     typedef vector<byte_t>::iterator discardsIt_t;
+    typedef vector<byte_t>::const_iterator const_discardsIt_t;
     byte_t prodType;
     byte_t average;
     byte_t megaSize;
@@ -316,6 +350,15 @@ public:
     void discardCard(byte_t value) {
         discards.push_back(value);
     }
+    
+    size_t getDiscardSize() const { return discards.size(); }
+    
+    amt_t getDiscardSum() const {
+        amt_t sum = 0;
+        for (const_discardsIt_t i=discards.begin(); i!=discards.end(); i++)
+            sum += *i;
+        return sum;
+    }
 
     void dump() {
         cout << factoryNames[prodType] << " deck: ";
@@ -326,7 +369,8 @@ public:
     }
 };
 
-typedef vector<productionDeck_t> bank_t;
+typedef fixedvector<productionDeck_t,PRODUCTION_COUNT> bank_t;
+// typedef vector<productionDeck_t> bank_t;
 
 struct player_t;
 
@@ -361,26 +405,30 @@ public:
 
     virtual amt_t wantMega(productionEnum_t which,amt_t maxMega) = 0;
     virtual cardIndex_t pickDiscard(vector<card_t> &hand) = 0;
-    virtual void yourTurn() { }
     virtual cardIndex_t pickCardToAuction(vector<card_t> &hand,vector<upgradeEnum_t> &upgradeMarket,money_t &bid) = 0;
-    virtual money_t raiseOrPass(vector<card_t> &hand,upgradeEnum_t upgrade,money_t bid) = 0;
+    virtual money_t raiseOrPass(player_t& highBidder,vector<card_t> &hand,upgradeEnum_t upgrade,money_t bid) = 0;
     virtual money_t payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t minimumResearchCards); // returns actual amount paid which may be higher
     virtual amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) = 0;
     virtual amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) = 0;
     virtual amt_t purchaseRobots(money_t perRobot,amt_t maxAllowed,amt_t maxUsable) = 0;
     virtual void assignPersonnel();
     virtual void moveOperatorToNewFactory(productionEnum_t newFactory);
+    virtual void plan(turnphase_t) { }
 };
+
+typedef vector<card_t>::iterator cardIt_t;
+typedef fixedvector<byte_t,PRODUCTION_COUNT> factoryArray_t;
+typedef fixedvector<byte_t,PRODUCTION_COUNT+1> operatorArray_t;
+typedef fixedvector<byte_t,UPGRADE_COUNT> upgradeArray_t;
 
 struct player_t {
     vector<card_t> hand;
-    typedef vector<card_t>::iterator cardIt_t;
     byte_t colonists, colonistLimit, extraColonistLimit, robots, productionSize, productionLimit;
     money_t totalCredits, totalUpgradeCosts;
-    vector<byte_t> factories;
-    vector<byte_t> mannedByColonists;
-    vector<byte_t> mannedByRobots;
-    vector<byte_t> upgrades;
+    factoryArray_t factories;
+    operatorArray_t mannedByColonists;
+    operatorArray_t mannedByRobots;
+    upgradeArray_t upgrades;
     brain_t *brain;
 
     player_t() {
@@ -390,15 +438,16 @@ struct player_t {
         robots = 0; // active robots limit is colonistLimit times number of robotics upgrades.
         productionLimit = 10;
         productionSize = 0;
-        factories.resize(PRODUCTION_COUNT);
         // the last element of these two arrays is used to hold personnnel not assigned to any factory
-        mannedByColonists.resize(PRODUCTION_COUNT+1);
-        mannedByRobots.resize(PRODUCTION_COUNT+1);
-        upgrades.resize(UPGRADE_COUNT);
         totalCredits = 0;
         totalUpgradeCosts = 0;
         brain = 0;
 
+        factories.fill(0);
+        mannedByRobots.fill(0);
+        mannedByRobots.fill(0);
+        upgrades.fill(0);
+        
         factories[ORE] = 2;
         mannedByColonists[ORE] = 2;
         factories[WATER] = 1;
@@ -577,19 +626,16 @@ struct player_t {
         brain->payFor(cost,hand,bank,minResearchCards);
     }
     
-    void yourTurn() {
-        brain->yourTurn();
-    }
-    
     cardIndex_t pickCardToAuction(vector<upgradeEnum_t> &upgradeMarket,money_t &bid) {
         return brain->pickCardToAuction(hand,upgradeMarket,bid);
     }
     
-    money_t raiseOrPass(upgradeEnum_t upgrade,money_t minBid) {
-        return brain->raiseOrPass(hand,upgrade,minBid);
+    money_t raiseOrPass(player_t &highBidder,upgradeEnum_t upgrade,money_t minBid) {
+        return brain->raiseOrPass(highBidder,hand,upgrade,minBid);
     }
 
     void purchaseFactories(bool firstTurn,bank_t &bank) {
+        brain->plan(BUYING_FACTORIES);
         for (;;) {
             vector<byte_t> forPurchase;
             getMaxFactories(forPurchase);
@@ -619,6 +665,7 @@ struct player_t {
     
     void purchaseAndAssignPersonnel(bank_t &bank) {
         if (colonists < colonistLimit + extraColonistLimit) {
+            brain->plan(BUYING_COLONISTS);
             money_t price = upgrades[ECOPLANTS]? 5: 10;
             amt_t limit = colonistLimit + extraColonistLimit - colonists;
             if (limit > totalCredits / price)
@@ -634,6 +681,7 @@ struct player_t {
         // you must have ROBOTICS in order to buy any.  there is no limit to how many you can buy,
         // but you can only operate one per colonist per ROBOTICS upgrade owned.
         if (upgrades[ROBOTICS]) {
+            brain->plan(BUYING_ROBOTS);
             money_t price = 10;
             amt_t limit = totalCredits / price;
             amt_t purchased = limit? brain->purchaseRobots(price,limit,(upgrades[ROBOTICS] * (colonistLimit + extraColonistLimit)) - robots) : 0;
@@ -707,10 +755,10 @@ struct player_t {
 };
 
 class game_t {
-    vector<productionDeck_t> bank;
-    vector<byte_t> upgradeDrawPiles;
+    bank_t bank;
+    upgradeArray_t upgradeDrawPiles;
     vector<upgradeEnum_t> upgradeMarket;
-    vector<byte_t> currentMarketCounts;
+    upgradeArray_t currentMarketCounts;
     vector<player_t> players;
     typedef vector<player_t>::iterator playerIt_t;
     struct playerPos_t {
@@ -734,12 +782,14 @@ public:
 
         era = 1;
         previousMarketEmpty = false;
+        upgradeDrawPiles.fill(0);
         upgradeMarket.clear();
-        currentMarketCounts.clear();
-        currentMarketCounts.resize(UPGRADE_COUNT);
+        currentMarketCounts.fill(0);
         marketLimit = playerCount >> 1;
     }
     
+    const bank_t& getBank() const { return bank; }
+        
     void setupProductionDecks() {
         static const cardDistribution_t OreDeck[] = { {1,4}, {2,6}, {3,6}, {4,6}, {5,4} };
         static const cardDistribution_t WaterDeck[] = { {4,2}, {5,5}, {6,7}, {7,9}, {8,7}, {9,5}, {10,3} };
@@ -751,8 +801,6 @@ public:
         static const cardDistribution_t RingOreDeck[] = { {30,1}, {35,3}, {40,4}, {45,3}, {50,1} };
         static const cardDistribution_t MoonOreDeck[] = { {40,1}, {45,3}, {50,4}, {55,3}, {60,1} };
 
-        bank.clear();
-        bank.resize(PRODUCTION_COUNT);
         bank[ORE].init(ORE,OreDeck,NELEM(OreDeck),3,0,true);
         bank[WATER].init(WATER,WaterDeck,NELEM(WaterDeck),7,30,true);
         bank[TITANIUM].init(TITANIUM,TitaniumDeck,NELEM(TitaniumDeck),10,44,true);
@@ -765,35 +813,33 @@ public:
     }
 
     void setupUpgradeDecks(playerIndex_t playerCount) {
-        upgradeDrawPiles.clear();
-        upgradeDrawPiles.reserve(PRODUCTION_COUNT);
         if (playerCount == 2) {
             int even = 0, odd = 0;
             int i;
             for (i=DATA_LIBRARY; i<UPGRADE_COUNT; i++) {
                 if (rand() & 1) {
-                    upgradeDrawPiles.push_back(1);
+                    upgradeDrawPiles[i]=1;
                     if (++odd == 10)
                         break;
                 }
                 else {
-                    upgradeDrawPiles.push_back(2);
+                    upgradeDrawPiles[i]=2;
                     if (++even == 10)
                         break;
                 }
             }
             // at most 10 upgrade types allowed with one count
             for (; i<UPGRADE_COUNT; i++) {
-                upgradeDrawPiles.push_back((odd == 10)? 2 : 1);
+                upgradeDrawPiles[i] = (odd == 10)? 2 : 1;
             }
         }
         else {
             static const byte_t upgrades_1_10[10] = { 0,0,0, 2,3,3,4,5,5,6 };
             static const byte_t upgrades_11_13[10] = { 0,0,0, 2,3,4,4,5,6,6 };
             for (int i=DATA_LIBRARY; i<SPACE_STATION; i++)
-                upgradeDrawPiles.push_back(upgrades_1_10[playerCount]);
+                upgradeDrawPiles[i] = upgrades_1_10[playerCount];
             for (int i=SPACE_STATION; i<UPGRADE_COUNT; i++)
-                upgradeDrawPiles.push_back(upgrades_11_13[playerCount]);
+                upgradeDrawPiles[i] = upgrades_11_13[playerCount];
         }
     }
 
@@ -941,6 +987,19 @@ public:
         else
             table << "There are " << upgradeMarket.size() << " cards available for auction.\n"; */
         displayPlayerOrder();
+        
+        // Notify everybody that an auction is starting, letting them know whether they
+        // already had their turn or it IS their turn or they haven't had their turn yet.
+        turnphase_t phase = AUCTION_AFTER_MY_TURN;
+        for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
+            if (selfIndex == i->selfIndex) {
+                players[selfIndex].brain->plan(AUCTION_MY_TURN);
+                phase = AUCTION_BEFORE_MY_TURN;
+            }
+            else
+                players[i->selfIndex].brain->plan(phase);
+        }
+        
         while (upgradeMarket.size() && (nextAuction = players[selfIndex].pickCardToAuction(upgradeMarket,bid)) != upgradeMarket.size()) {
             // remove the card from the market
             upgradeEnum_t upgrade = upgradeMarket[nextAuction];
@@ -955,7 +1014,7 @@ public:
             for (;;) {
                 if (++nextBidder == players.size())
                     nextBidder = 0;
-                money_t newBid = players[nextBidder].raiseOrPass(upgrade,bid+1);
+                money_t newBid = players[nextBidder].raiseOrPass(players[highBidder],upgrade,bid+1);
                 // somebody wants to bid?
                 if (newBid) {
                     highBidder = nextBidder;
@@ -984,7 +1043,6 @@ public:
     void performPlayerTurns(bool firstTurn) {
         for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
             table << "\n=== " << players[i->selfIndex].getName() << "'s turn ===\n\n";
-            players[i->selfIndex].yourTurn();
             auctionUpgradeCards(i->selfIndex);
             players[i->selfIndex].purchaseFactories(firstTurn,bank);
             players[i->selfIndex].purchaseAndAssignPersonnel(bank);
@@ -1162,49 +1220,111 @@ void brain_t::moveOperatorToNewFactory(productionEnum_t dest) {
  */
 class computerBrain_t: public brain_t {
     const game_t &game;
-    int lastFactory;
+    amt_t reserveForExpansion;
+    fixedvector<amt_t, PRODUCTION_COUNT> priceWillPay;
+    productionEnum_t factoryWeWant;
 public:
     computerBrain_t(string name,const game_t &theGame) : brain_t(name), game(theGame) { } 
-    amt_t wantMega(productionEnum_t,amt_t maxMega) { 
-        // this decision is hard -- need to factor in what cards we think are left in the deck,
-        // and whether we're making any big purchases this turn, and whether we'd be over our
-        // hand limit and have to discard.
-        // for now, just do it once in a while.
-        return (rand() & 3) == 0; 
+    amt_t wantMega(productionEnum_t which,amt_t maxMega) { 
+        const productionDeck_t &deck = game.getBank()[which];
+        size_t discardCount = deck.getDiscardSize();
+        // If fewer than 4 discards, take our changes with regular cards
+        if (discardCount < 4)
+            return 0;
+        amt_t discardSum = deck.getDiscardSum();
+        for (cardIt_t c=player->hand.begin(); c!=player->hand.end(); c++) {
+            // count any normal cards in hand as well
+            if (c->prodType == which && c->handSize==1 && c->returnToDiscard) {
+                ++discardCount;
+                discardSum += c->value;
+            }
+                
+        }
+        // only take a mega if it's less than 4x the average of all known already-discarded cards
+        // in other words, we're more likely to take a mega if a lot of high-value cards have
+        // already been discarded.
+        return ((discardSum * 4) / discardCount) > deck.getMegaValue();
     }
     cardIndex_t pickDiscard(vector<card_t> &hand) {
-        // Just pick the cheapest card we have.  (cards are always in sorted order)
-        // Note that we could end up discarding a research card we needed to buy research factory!
-        return 0;
+        // Hand is already in sorted order.  But *never* pick a "free" card to discard.
+        cardIndex_t i = 0;
+        while (hand[i].handSize == 0)
+            ++i;
+        return i;
     }
-    void yourTurn() {
-        // reset variable remembering highest factory we purchased
-        lastFactory = NEW_CHEMICALS+1;
+    void plan(turnphase_t phase) {
+        // int vps = player->computeVictoryPoints();
+        
+        // If we're about to buy factories, assign personnel first to account for any free purchases.
+        // (this is almost always already done, main exception is new robot when purchasing robotics)
+        if (phase == BUYING_FACTORIES)
+            assignPersonnel();
+        
+        priceWillPay.fill(0);
+        
+        // Amount of money we do NOT want to use for bids.
+        reserveForExpansion = 0;
+
+        // if we cannot afford any new operators or we're out of room, only pick a factory that we can afford
+        // that can take an operator
+        
+        // if new chemicals is possible, save up for that.
+        bool hasResearch = false;
+        for (cardIt_t c=player->hand.begin(); c!=player->hand.end(); c++)
+            if (c->prodType == RESEARCH)
+                hasResearch = true;
+        if (hasResearch)
+            factoryWeWant = NEW_CHEMICALS;
+        else if (player->upgrades[SCIENTISTS])
+            factoryWeWant = RESEARCH;
+        else if (player->upgrades[HEAVY_EQUIPMENT])
+            factoryWeWant = TITANIUM;
+        else
+            factoryWeWant = WATER;
+      
+        // evaluate each available upgrade based on criteria:
+        // 1. how much would it benefit us
+        // 2. how much would it benefit the high bidder (perhaps if they're ahead of us)
+        // 3. are there more available in the market right now
+        // 4. are there more available on a future turn
+        
+        // base what we purchase party on trying to avoid discarding cards next turn.
     }
     cardIndex_t pickCardToAuction(vector<card_t> &hand,vector<upgradeEnum_t> &upgradeMarket,money_t &bid) {
         // figure out which things we can actually afford.
-        vector<byte_t> order;
-        for (unsigned i=0; i<upgradeMarket.size(); i++) {
+        amt_t bestWillPay = 0;
+        cardIndex_t bestIndex = upgradeMarket.size();
+        for (cardIndex_t i=0; i<upgradeMarket.size(); i++) {
             upgradeEnum_t upgrade = upgradeMarket[i];
-            if (player->getTotalCredits() + player->computeDiscount(upgrade) >= upgradeCosts[upgrade])
-                order.push_back(i);
+            amt_t discount = player->computeDiscount(upgrade);
+            if (player->getTotalCredits() + discount >= upgradeCosts[upgrade] && priceWillPay[upgrade] > bestWillPay) {
+                bestWillPay = priceWillPay[upgrade];
+                bestIndex = i;
+            }
         }
-        if (!order.size())
+        // didn't find anything we want?  (or could afford...)
+        if (!bestWillPay)
             return upgradeMarket.size();
-        cardIndex_t which = order[rand() % order.size()];
-        // TODO: if we suspect we know what people can actually afford, we should raise our bid slightly
-        // if we're already near our limit.
-        bid = findBestCards(upgradeCosts[upgradeMarket[which]],hand,0,0);
-        return which;
+        bid = findBestCards(upgradeCosts[upgradeMarket[bestIndex]],hand,0,0);
+        return bestIndex;
     }
-    money_t raiseOrPass(vector<card_t> &hand,upgradeEnum_t upgrade,money_t minBid) {
+    money_t raiseOrPass(player_t &highBidder,vector<card_t> &hand,upgradeEnum_t upgrade,money_t minBid) {
         // if we can't afford a higher bid, bail out now.
         if (player->getTotalCredits() < minBid)
             return 0;
-        // random chance we pass anyway, moreso if we already have one or more
-        if ((rand() & 3) + player->upgrades[upgrade] > 2)
+        // Figure out how many victory points they would gain or lose on us if current high bidder won.
+        money_t vpDelta = highBidder.computeVictoryPoints() + potentialVpsForUpgrade[upgrade] - player->computeVictoryPoints();
+        if (debugLevel > 0)
+            debug << name << " will pay up to " << priceWillPay[upgrade] << " for a " << upgradeNames[upgrade] << " and " << highBidder.getName() << " will be " << (vpDelta<0?-vpDelta:vpDelta) << " points " <<
+            (vpDelta>0?"ahead":"behind") << " if they won.\n";
+        // If the price we will pay is below the minimum bid, don't bid.
+        // But take the victory point swing if the current high bidder wins, relative to us, into account.
+        // If they're going to be ahead of us, adjust our max price higher.  If they'll be behind us, don't care so much.
+        // VP delta should be multiplied by a factor since a victory point typically "costs" about 15$, but we don't want
+        // that affecting our decision too much.  Could be a per-AI property.
+        if (priceWillPay[upgrade] < minBid - (vpDelta * 3))
             return 0;
-        vector<card_t> handCopy(hand);
+        
         amt_t discount = player->computeDiscount(upgrade);
         // handle the (unlikely) case that it's free
         if (discount >= minBid)
@@ -1231,15 +1351,20 @@ public:
         return actualWanted;
     }
     amt_t purchaseFactories(const vector<byte_t> &maxByType,productionEnum_t &whichFactory) {
-        // need more smarts here... shouldn't keep buying factories that we have no hope of staffing.
-        while (lastFactory != ORE) {
-            --lastFactory;
-            if (maxByType[lastFactory] && player->factories[lastFactory] < player->mannedByColonists[lastFactory] + player->mannedByRobots[lastFactory] + 2) {
-                whichFactory = (productionEnum_t)lastFactory;
-                return adjustAmountIfBigMoney(factoryCosts[lastFactory],maxByType[lastFactory],(maxByType[lastFactory] + 1) / 2,lastFactory==NEW_CHEMICALS?maxByType[lastFactory]:0);
+        if (factoryWeWant != PRODUCTION_COUNT) {
+            whichFactory = factoryWeWant;
+            if (maxByType[whichFactory] == 0) {
+                if (debugLevel > 0)
+                    debug << name << " wanted to buy a " << factoryNames[whichFactory] << " but couldn't?\n";
+                return 0;
+            }
+            else {
+                factoryWeWant = PRODUCTION_COUNT;
+                return 1;
             }
         }
-        return 0;
+        else
+            return 0;
     }
     amt_t purchaseColonists(money_t perColonist,amt_t maxAllowed) {
         // don't buy colonists if we already have some we haven't used yet.
@@ -1292,7 +1417,7 @@ public:
                 if (which == EMPTY)
                     return upgradeMarket.size();
                 else if (which < upgradeMarket.size()) {
-                    bid = raiseOrPass(hand,upgradeMarket[which],upgradeCosts[upgradeMarket[which]]);
+                    bid = raiseOrPass(*player,hand,upgradeMarket[which],upgradeCosts[upgradeMarket[which]]);
                     if (!bid) {      // couldn't make valid opening bid, bounce them to selection menu
                         active << "You cannot afford that.\n";
                         break;
@@ -1305,7 +1430,7 @@ public:
             }
         }
     }
-    money_t raiseOrPass(vector<card_t> &hand,upgradeEnum_t upgrade,money_t minBid) {
+    money_t raiseOrPass(player_t &,vector<card_t> &hand,upgradeEnum_t upgrade,money_t minBid) {
         money_t discount = player->computeDiscount(upgrade);
         // don't bother asking if we cannot afford one higher than current bid
         if (player->getTotalCredits() < minBid - discount)
@@ -1442,7 +1567,7 @@ public:
             char cmd = readLetter();
             if (cmd != 'C' && cmd != 'R')
                 return;
-            vector<byte_t> &manned = (cmd == 'C')? player->mannedByColonists : player->mannedByRobots;
+            operatorArray_t &manned = (cmd == 'C')? player->mannedByColonists : player->mannedByRobots;
             active << "Transfer source? ";
             productionEnum_t src = (productionEnum_t)readUnsigned();
             if (src > UNUSED || !manned[src]) {
