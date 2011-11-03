@@ -727,7 +727,7 @@ struct player_t {
     
     money_t getTotalUpgradeCosts() const { return totalUpgradeCosts; }
     
-    void getExpectedMoneyInHand(int &minPossible,int &maxPossible) const {
+    void getExpectedMoneyInHand(money_t &minPossible,money_t &maxPossible) const {
         static const byte_t minPerCard[PRODUCTION_COUNT] = { 1,4,7,9,14,14,20,30,40 };
         static const byte_t maxPerCard[PRODUCTION_COUNT] = { 5,10,13,17,20,26,40,50,60 };
         
@@ -897,7 +897,7 @@ public:
                 if (p.factories[i])
                     table << " " << int(p.factories[i]) << "/" << factoryNames[i] << "(" << int(p.mannedByColonists[i]) << "+" << int(p.mannedByRobots[i]) << ");";
             table << " Unused(" << int(p.mannedByColonists[UNUSED]) << "+" << int(p.mannedByRobots[UNUSED]) << "); ";
-            int minPos, maxPos;
+            money_t minPos, maxPos;
             p.getExpectedMoneyInHand(minPos, maxPos);
             if (minPos == maxPos)
                 table << "exactly " << minPos << "$ in hand.\n";
@@ -1040,6 +1040,10 @@ public:
         }
     }
 
+    const vector<player_t>& getPlayers() const {
+        return players;
+    }
+    
     void performPlayerTurns(bool firstTurn) {
         for (playerOrderIt_t i=playerOrder.begin(); i!=playerOrder.end(); i++) {
             table << "\n=== " << players[i->selfIndex].getName() << "'s turn ===\n\n";
@@ -1329,8 +1333,34 @@ public:
         // handle the (unlikely) case that it's free
         if (discount >= minBid)
             return discount;
-        else    // find the closest match
-            return findBestCards(minBid - discount,hand,0,0) + discount;
+        else {    
+            // find the closest match
+            money_t bid = findBestCards(minBid - discount,hand,0,0) + discount;
+            
+            // based on number of cards in their hand and their discount, figure out
+            // how many opponents might still be able to outbid us.
+            amt_t playersWhoMightOutbidUs = 0;
+            for (playerIndex_t i=0; i<game.getPlayers().size(); i++) {
+                const player_t &p = game.getPlayers()[i];
+                money_t mini, maxi;
+                if (&p != player) {
+                    p.getExpectedMoneyInHand(mini,maxi);
+                    if (maxi + p.computeDiscount(upgrade) > bid)
+                        ++playersWhoMightOutbidUs;
+                }
+            }
+            // If we're in a 3p game, and we can bid up to 10 and the current bid is 8, jump to high bid now
+            // because otherwise the other two players might raise it back up.  In other words, if we're
+            // pretty close to our maximum bid and there are other players who could raise by 1 enough
+            // times to put us out of the running, go ahead and jump to maximum bid now.
+            if (bid < priceWillPay[upgrade] && priceWillPay[upgrade] - bid <= playersWhoMightOutbidUs) {
+                if (debugLevel > 0)
+                    debug << name << " is raising their bid from " << bid << " to " << priceWillPay[upgrade] << " because they think " << playersWhoMightOutbidUs
+                        << " other players can outbid them.\n";
+                bid = priceWillPay[upgrade];
+            }
+            return bid;
+        }
     }
     amt_t adjustAmountIfBigMoney(money_t each,amt_t maxAllowed,amt_t actualWanted,amt_t minResearchCards = 0) {
         money_t expectedSpent = each * actualWanted;
