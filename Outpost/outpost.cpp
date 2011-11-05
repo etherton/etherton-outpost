@@ -1225,11 +1225,14 @@ void brain_t::moveOperatorToNewFactory(productionEnum_t dest) {
  */
 class computerBrain_t: public brain_t {
     const game_t &game;
-    amt_t reserveForExpansion;
     fixedvector<amt_t, PRODUCTION_COUNT> priceWillPay;
     productionEnum_t factoryWeWant;
+    bool reallyNeedMoreOperatorCapacity;
 public:
-    computerBrain_t(string name,const game_t &theGame) : brain_t(name), game(theGame) { } 
+    computerBrain_t(string name,const game_t &theGame) : brain_t(name), game(theGame) { 
+        factoryWeWant = PRODUCTION_COUNT;
+        reallyNeedMoreOperatorCapacity = false;
+    } 
     amt_t wantMega(productionEnum_t which,amt_t maxMega) { 
         const productionDeck_t &deck = game.getBank()[which];
         size_t discardCount = deck.getDiscardSize();
@@ -1281,14 +1284,6 @@ public:
             Research: $20/VP, 13 income
             New Chemicals: $23/VP, 20 income
         */
-        // int vps = player->computeVictoryPoints();
-        
-        if (player->factories[WATER]<3)
-            factoryWeWant = WATER;
-        
-        // early in the game, 
-        //if (phase == AUCTION_MY_TURN);
-        
         // If we're about to buy factories, assign personnel first to account for any free purchases.
         // (this is almost always already done, main exception is new robot when purchasing robotics)
         if (phase == BUYING_FACTORIES)
@@ -1325,18 +1320,18 @@ public:
         // be willing to pay more for ecoplants (which actually is pretty cheap for the VP's)
         if (player->colonists < player->colonistLimit + player->extraColonistLimit || player->colonistLimit == 5)
             priceWillPay[ECOPLANTS] += 15;
+        // If we're really short on operator capacity (ie it's limiting our production) raise our prices even higher
+        if (reallyNeedMoreOperatorCapacity) {
+            priceWillPay[NODULE] += 10;
+            priceWillPay[ROBOTICS] += 30;
+            priceWillPay[OUTPOST] += 20;
+        }
         
         // We'll pay up to $20/VP for any era 3 tech.  The exact limits will
         // depend on our relative standing to the current high bidder.
         priceWillPay[SPACE_STATION] = 200;
         priceWillPay[PLANETARY_CRUISER] = 300;
         priceWillPay[MOON_BASE] = 400;
-        
-        // Amount of money we do NOT want to use for bids.
-        reserveForExpansion = 0;
-
-        // if we cannot afford any new operators or we're out of room, only pick a factory that we can afford
-        // that can take an operator
         
         // if new chemicals is possible, save up for that.
         bool hasResearch = false;
@@ -1351,15 +1346,23 @@ public:
             factoryWeWant = TITANIUM;
         else
             factoryWeWant = WATER;
-        
-        // evaluate each available upgrade based on criteria:
-        // 1. how much would it benefit us
-        // 2. how much would it benefit the high bidder (perhaps if they're ahead of us)
-        // 3. are there more available in the market right now
-        // 4. are there more available on a future turn
-        
-        // base what we purchase party on trying to avoid discarding cards next turn.
-    }
+ 
+        // if we buy the factory will we actually be able to man it?
+        // (any factory we can buy must be manned by an operator, either human or robot)
+        // (computer players never buy q robot they cannot use)
+        reallyNeedMoreOperatorCapacity = false;
+        if (!player->mannedByColonists[UNUSED] && !player->mannedByRobots[UNUSED]) {
+            int i = factoryWeWant - 1;
+            while (i >= ORE) {
+                if (player->mannedByColonists[i] || player->mannedByRobots[i])
+                    break;
+            }
+            if (i < ORE) {
+                factoryWeWant = PRODUCTION_COUNT;   // no factory
+                reallyNeedMoreOperatorCapacity = true;
+            }
+        }
+     }
     cardIndex_t pickCardToAuction(vector<card_t> &hand,vector<upgradeEnum_t> &upgradeMarket,money_t &bid) {
         // figure out which things we can actually afford.
         amt_t bestWillPay = 0;
@@ -1392,7 +1395,7 @@ public:
         // If they're going to be ahead of us, adjust our max price higher.  If they'll be behind us, don't care so much.
         // VP delta should be multiplied by a factor since a victory point typically "costs" about 15$, but we don't want
         // that affecting our decision too much.  Could be a per-AI property.
-        if (priceWillPay[upgrade] < minBid - (vpDelta * 3))
+        if (priceWillPay[upgrade] < minBid - (vpDelta))
             return 0;
         
         amt_t discount = player->computeDiscount(upgrade);
@@ -1790,9 +1793,11 @@ int main(int argc,char **argv) {
 
     // set up the play area, deal hands, etc
     game.setupGame();
-    // do the first turn of the game (several phases are skipped, victory is impossible and so is an era change
+    // do the first turn of the game (several phases are skipped)
     game.displayPlayerOrder();
     game.performPlayerTurns(true);
+    // game cannot possibly end but let's get vp's and turn order correct for second turn.
+    game.checkVictoryConditions();
     amt_t round = 1;
     
     // now enter the normal turn progression
