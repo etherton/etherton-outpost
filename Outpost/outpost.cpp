@@ -431,7 +431,7 @@ typedef fixedvector<byte_t,UPGRADE_COUNT> upgradeArray_t;
 
 struct player_t {
     vector<card_t> hand;
-    byte_t colonists, colonistLimit, extraColonistLimit, robots, productionSize, productionLimit;
+    byte_t colonists, colonistLimit, extraColonistLimit, robots, productionSize, productionLimit, expectedProductionSize;
     money_t totalCredits, totalUpgradeCosts, averageIncome;
     factoryArray_t factories;
     operatorArray_t mannedByColonists;
@@ -757,6 +757,10 @@ struct player_t {
         return averageIncome;
     }
     
+    amt_t getExpectedProductionSize() const {
+        return expectedProductionSize;
+    }
+    
     void computeExpectedIncome() {
         int numOre = mannedByColonists[ORE] + mannedByRobots[ORE];
         int numWater = mannedByColonists[WATER] + mannedByRobots[WATER];
@@ -769,6 +773,7 @@ struct player_t {
         int numMoonOre = mannedByColonists[MOON_ORE];
         // Assume we'll be throwing out the worst cards if we're producing more than we can hold
         // (but research and microbiotics never count against hand limit)
+        expectedProductionSize = numOre + numWater + numTitanium + numNewChemicals + numOrbitalMedicine + numRingOre + numMoonOre;
         while (numOre + numWater + numTitanium + numNewChemicals + numOrbitalMedicine + numRingOre + numMoonOre > productionLimit) {
             if (numOre) --numOre;
             else if (numWater) --numWater;
@@ -1337,7 +1342,7 @@ public:
             assignPersonnel();
         
         // any upgrade is 125% of face value for starters.
-        for (int i=0; i<PRODUCTION_COUNT; i++)
+        for (int i=0; i<UPGRADE_COUNT; i++)
             priceWillPay[i] = (upgradeCosts[i] * 20) >> 4;
         
         // favor things we have discounts for (but not necessarily at full discount value)
@@ -1430,18 +1435,38 @@ public:
                 reallyNeedFactory = true;
         }
         
+        amt_t maxBid = player->getTotalCredits();
+        
         if (factoryWeWant != PRODUCTION_COUNT && phase < AUCTION_AFTER_MY_TURN && reallyNeedFactory) {
             amt_t costForFactory = findBestCards(factoryCosts[factoryWeWant],player->hand,factoryWeWant==NEW_CHEMICALS?1:0,NULL);
-            amt_t maxBid = player->getTotalCredits() - costForFactory;
-            for (int i=DATA_LIBRARY; i<=MOON_BASE; i++)
-                if (priceWillPay[i] > maxBid)
-                    priceWillPay[i] = maxBid;
+            maxBid = player->getTotalCredits() - costForFactory;
+        }
+        
+        // If we're not buying a factory, figure out if we're probably discarding cards next turn
+        if (factoryWeWant == PRODUCTION_COUNT) {
+            int expectedDiscards = player->getExpectedProductionSize() + player->productionSize - player->productionLimit;
+            if (expectedDiscards > 0) {
+                // find the worst factory that is still manned
+                int worstFactory = ORE;
+                while (worstFactory != NEW_CHEMICALS) {
+                    if (player->mannedByColonists[worstFactory] || player->mannedByRobots[worstFactory])
+                          break;
+                    else
+                        ++worstFactory;
+                }
+                static byte_t averageIncome[] = { 3, 7, 10, 13, 17, 20 };
+                money_t expectedWaste = expectedDiscards * averageIncome[worstFactory];
+                if (debugLevel > 0)
+                    debug << name << " expects to have to discard " << expectedDiscards << " next turn, wasting about " << expectedWaste << ".\n";
+                for (int i=DATA_LIBRARY; i<=MOON_BASE; i++)
+                    priceWillPay[i] += expectedWaste;
+            }
         }
         
         // To keep later code simpler, zero out prices on things we cannot afford.
         for (int i=DATA_LIBRARY; i<=MOON_BASE; i++) {
-            if (priceWillPay[i] > player->getTotalCredits())
-                priceWillPay[i] = player->getTotalCredits();
+            if (priceWillPay[i] > maxBid)
+                priceWillPay[i] = maxBid;
             if (priceWillPay[i] < upgradeCosts[i])
                 priceWillPay[i] = 0;
         }
