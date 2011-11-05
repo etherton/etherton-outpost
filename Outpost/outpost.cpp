@@ -135,6 +135,14 @@ enum turnphase_t {
     BUYING_ROBOTS
 };
 
+const char *turnphases[] = {
+    "AUCTION_BEFORE_MY_TURN",
+    "AUCTION_MY_TURN",
+    "AUCTION_AFTER_MY_TURN",
+    "BUYING_FACTORIES",
+    "BUYING_COLONISTS",
+    "BUYING_ROBOTS"
+};
 
 typedef unsigned char byte_t;
 
@@ -424,7 +432,7 @@ typedef fixedvector<byte_t,UPGRADE_COUNT> upgradeArray_t;
 struct player_t {
     vector<card_t> hand;
     byte_t colonists, colonistLimit, extraColonistLimit, robots, productionSize, productionLimit;
-    money_t totalCredits, totalUpgradeCosts;
+    money_t totalCredits, totalUpgradeCosts, averageIncome;
     factoryArray_t factories;
     operatorArray_t mannedByColonists;
     operatorArray_t mannedByRobots;
@@ -444,7 +452,7 @@ struct player_t {
         brain = 0;
 
         factories.fill(0);
-        mannedByRobots.fill(0);
+        mannedByColonists.fill(0);
         mannedByRobots.fill(0);
         upgrades.fill(0);
         
@@ -452,6 +460,8 @@ struct player_t {
         mannedByColonists[ORE] = 2;
         factories[WATER] = 1;
         mannedByColonists[WATER] = 1;
+        
+        computeExpectedIncome();
     }
     
       ~player_t() {
@@ -661,6 +671,7 @@ struct player_t {
             else
                 break;
         }
+        computeExpectedIncome();
     }
     
     void purchaseAndAssignPersonnel(bank_t &bank) {
@@ -693,6 +704,7 @@ struct player_t {
             }
         }        
         brain->assignPersonnel();
+        computeExpectedIncome();
     }
     
     void displayHoldings() {
@@ -739,6 +751,36 @@ struct player_t {
             minPossible += c->returnToDiscard? minPerCard[c->prodType] : c->value;
             maxPossible += c->returnToDiscard? maxPerCard[c->prodType] : c->value;
         }
+    }
+    
+    money_t getAverageIncome() const {
+        return averageIncome;
+    }
+    
+    void computeExpectedIncome() {
+        int numOre = mannedByColonists[ORE] + mannedByRobots[ORE];
+        int numWater = mannedByColonists[WATER] + mannedByRobots[WATER];
+        int numTitanium = mannedByColonists[TITANIUM] + mannedByRobots[TITANIUM];
+        int numResearch = upgrades[SCIENTISTS] + mannedByColonists[RESEARCH] + mannedByRobots[RESEARCH];
+        int numMicrobiotics = upgrades[ORBITAL_LAB];
+        int numNewChemicals = mannedByColonists[NEW_CHEMICALS] + mannedByRobots[NEW_CHEMICALS];
+        int numOrbitalMedicine = mannedByColonists[ORBITAL_MEDICINE];
+        int numRingOre = mannedByColonists[RING_ORE];
+        int numMoonOre = mannedByColonists[MOON_ORE];
+        // Assume we'll be throwing out the worst cards if we're producing more than we can hold
+        // (but research and microbiotics never count against hand limit)
+        while (numOre + numWater + numTitanium + numNewChemicals + numOrbitalMedicine + numRingOre + numMoonOre > productionLimit) {
+            if (numOre) --numOre;
+            else if (numWater) --numWater;
+            else if (numTitanium) --numTitanium;
+            else if (numNewChemicals) --numNewChemicals;
+            else if (numOrbitalMedicine) --numOrbitalMedicine;
+            else if (numRingOre) --numRingOre;
+            else if (numMoonOre) --numMoonOre;
+        }
+        averageIncome = 3 * numOre + 7 * numWater + 10 * numTitanium + 13 * numResearch + 17 * numMicrobiotics +
+            20 * numNewChemicals + 30 * numOrbitalMedicine + 40 * numRingOre + 50 * numMoonOre;
+        assert(averageIncome);
     }
     
     void dump() {
@@ -898,6 +940,7 @@ public:
                 if (p.factories[i])
                     table << " " << int(p.factories[i]) << "/" << factoryNames[i] << "(" << int(p.mannedByColonists[i]) << "+" << int(p.mannedByRobots[i]) << ");";
             table << " Unused(" << int(p.mannedByColonists[UNUSED]) << "+" << int(p.mannedByRobots[UNUSED]) << "); ";
+            table << p.getAverageIncome() << "$ avg income; ";
             money_t minPos, maxPos;
             p.getExpectedMoneyInHand(minPos, maxPos);
             if (minPos == maxPos)
@@ -983,11 +1026,14 @@ public:
     void auctionUpgradeCards(playerIndex_t selfIndex) {
         cardIndex_t nextAuction;
         money_t bid;
-        /* if (upgradeMarket.size() == 1)
-            table << "There is 1 card available for auction.\n";
-        else
-            table << "There are " << upgradeMarket.size() << " cards available for auction.\n"; */
         displayPlayerOrder();
+        if (upgradeMarket.size() == 1)
+            table << "There is 1 card available for auction:";
+        else
+            table << "There are " << upgradeMarket.size() << " cards available for auction:";
+        for (int i=0; i<upgradeMarket.size(); i++)
+            table << " " << upgradeNames[upgradeMarket[i]];
+        table << "\n";
         
         // Notify everybody that an auction is starting, letting them know whether they
         // already had their turn or it IS their turn or they haven't had their turn yet.
@@ -1036,6 +1082,7 @@ public:
             if (bid > discount)
                 players[highBidder].payFor(bid - discount,bank,0);
             players[highBidder].addUpgrade(upgrade);
+            players[highBidder].computeExpectedIncome();
             
             displayPlayerOrder();
         }
@@ -1225,7 +1272,7 @@ void brain_t::moveOperatorToNewFactory(productionEnum_t dest) {
  */
 class computerBrain_t: public brain_t {
     const game_t &game;
-    fixedvector<amt_t, PRODUCTION_COUNT> priceWillPay;
+    fixedvector<amt_t, UPGRADE_COUNT> priceWillPay;
     productionEnum_t factoryWeWant;
     bool reallyNeedMoreOperatorCapacity;
 public:
@@ -1289,9 +1336,9 @@ public:
         if (phase == BUYING_FACTORIES)
             assignPersonnel();
         
-        // any upgrade is worth face value
+        // any upgrade is 125% of face value for starters.
         for (int i=0; i<PRODUCTION_COUNT; i++)
-            priceWillPay[i] = factoryCosts[i];
+            priceWillPay[i] = (upgradeCosts[i] * 20) >> 4;
         
         // favor things we have discounts for (but not necessarily at full discount value)
         priceWillPay[WAREHOUSE] += 3 * player->upgrades[HEAVY_EQUIPMENT];
@@ -1349,18 +1396,72 @@ public:
  
         // if we buy the factory will we actually be able to man it?
         // (any factory we can buy must be manned by an operator, either human or robot)
-        // (computer players never buy q robot they cannot use)
+        // (computer players never buy a robot they cannot use)
         reallyNeedMoreOperatorCapacity = false;
-        if (!player->mannedByColonists[UNUSED] && !player->mannedByRobots[UNUSED]) {
+        // if we have no unused operators and we're at our colonist limit *and* our robot limit, if applicable
+        if (!player->mannedByColonists[UNUSED] && !player->mannedByRobots[UNUSED] && player->colonists == player->colonistLimit + player->extraColonistLimit &&
+                (!player->upgrades[ROBOTICS] || player->robots >= player->upgrades[ROBOTICS] * (player->colonistLimit + player->extraColonistLimit))) {
             int i = factoryWeWant - 1;
             while (i >= ORE) {
                 if (player->mannedByColonists[i] || player->mannedByRobots[i])
                     break;
+                else
+                    --i;
             }
             if (i < ORE) {
+                if (debugLevel > 0)
+                    debug << name << " really needs more operator capacity!\n";
                 factoryWeWant = PRODUCTION_COUNT;   // no factory
                 reallyNeedMoreOperatorCapacity = true;
             }
+        }
+        
+        // If we want a factory and we're far enough behind on incomine and we haven't yet had our turn, 
+        // make sure none of our bids will prevent us from also purchasing a factory.
+        // (at beginning of game, we really want to get to three water factories)
+        bool reallyNeedFactory = player->getAverageIncome() <= 20;
+        if (!reallyNeedFactory) {
+            money_t bestIncome = game.players[0].getAverageIncome();
+            for (int i=1; i<game.players.size(); i++)
+                if (bestIncome < game.players[i].getAverageIncome())
+                    bestIncome = game.players[i].getAverageIncome();
+            // If we're more than 25% behind the income leader, we really want a factory.
+            if (((player->getAverageIncome() * 20) >> 4) < bestIncome)
+                reallyNeedFactory = true;
+        }
+        
+        if (factoryWeWant != PRODUCTION_COUNT && phase < AUCTION_AFTER_MY_TURN && reallyNeedFactory) {
+            amt_t costForFactory = findBestCards(factoryCosts[factoryWeWant],player->hand,factoryWeWant==NEW_CHEMICALS?1:0,NULL);
+            amt_t maxBid = player->getTotalCredits() - costForFactory;
+            for (int i=DATA_LIBRARY; i<=MOON_BASE; i++)
+                if (priceWillPay[i] > maxBid)
+                    priceWillPay[i] = maxBid;
+        }
+        
+        // To keep later code simpler, zero out prices on things we cannot afford.
+        for (int i=DATA_LIBRARY; i<=MOON_BASE; i++) {
+            if (priceWillPay[i] > player->getTotalCredits())
+                priceWillPay[i] = player->getTotalCredits();
+            if (priceWillPay[i] < upgradeCosts[i])
+                priceWillPay[i] = 0;
+        }
+        
+        if (debugLevel >= 2) {
+            debug << name << " plans during " << turnphases[phase] << ": ";
+            if (factoryWeWant != PRODUCTION_COUNT)
+                debug << "Wants a " << factoryNames[factoryWeWant] << (reallyNeedFactory? " factory REALLY BADLY; ":" factory; ");
+            else
+                debug << "Doesn't want any factories; ";
+            bool first = false;
+            for (int i=DATA_LIBRARY; i<=MOON_BASE; i++)
+                if (priceWillPay[i]) {
+                    if (!first) {
+                        debug << "Will pay up to ";
+                        first = true;
+                    }
+                    debug << priceWillPay[i] << "$ for a " << upgradeNames[i] << "; ";
+                }
+            debug << " Total cash on hand: " << player->getTotalCredits() << ".\n";
         }
      }
     cardIndex_t pickCardToAuction(vector<card_t> &hand,vector<upgradeEnum_t> &upgradeMarket,money_t &bid) {
@@ -1706,11 +1807,6 @@ public:
 
 
 int main(int argc,char **argv) {
-    unsigned playerCount;
-
-    // seed the RNG, but let it be overridden from user input
-    unsigned seed = (unsigned) time(NULL);
-
     if (argc > 1 && !strncmp(argv[1],"-d",2))
         debugLevel = atoi(argv[1]+2);
     
@@ -1736,81 +1832,89 @@ int main(int argc,char **argv) {
         table << "\n";
         table.setLeftMargin(0);
     }
-        
-    for (;;) {
-        table << "Number of players?  (2-9) ";
-        playerCount = readUnsigned();
-        if (playerCount < 2 || playerCount > 9)
-            seed = playerCount;
-        else
-            break;
-    }
-
-    table << "(using " << seed << " as RNG seed)" << "\n";
-    srand(seed);
-
-    game_t game(playerCount);
     
-    vector<string> computerNames;
-    computerNames.push_back("*Alan T.");
-    computerNames.push_back("*Steve J.");
-    computerNames.push_back("*Grace H.");
-    computerNames.push_back("*Donald K.");
-    computerNames.push_back("*Dennis R.");
-    computerNames.push_back("*Bjarne S.");
-    computerNames.push_back("*Herb S.");
-    computerNames.push_back("*Bill G.");
-    computerNames.push_back("*James H.");
-    random_shuffle(computerNames.begin(), computerNames.end());
-  
-    // attach brains to each player
-    table << "If you enter an empty string for a name, that and all future players will be run by computer.  ";
-    table << "Players should be entered in seating order (aka auction bidding order).\n";
-    table.setLeftMargin(4);
-    
-    bool anyHumans = true;
-    for (int i=0; i<playerCount; i++) {
-        string name;
-        if (anyHumans) {
-            table << "Player " << i+1 << " name? ";
-            getline(cin,name);
-            if (name.size() == 0)
-                anyHumans = false;
-        }
-        brain_t *thisBrain;
-        if (name.size() == 0) {
-            name = computerNames.back();
-            computerNames.pop_back();
-            thisBrain = new computerBrain_t(name,game);
-        }
-        else {
-            thisBrain = new playerBrain_t(name);
-            anyHumansInGame = true;
-        }
-            
-          game.setPlayerBrain(i,*thisBrain);
-    }
-
-    // set up the play area, deal hands, etc
-    game.setupGame();
-    // do the first turn of the game (several phases are skipped)
-    game.displayPlayerOrder();
-    game.performPlayerTurns(true);
-    // game cannot possibly end but let's get vp's and turn order correct for second turn.
-    game.checkVictoryConditions();
-    amt_t round = 1;
-    
-    // now enter the normal turn progression
     do {
-        ++round;
-        table << "\n\n";
-        table << "        =======================\n";
-        table << "        ===  R O U N D  " << ((round<10)?" ":"") << round << "  ===\n";
-        table << "        =======================\n\n";
+        unsigned playerCount;
+        
+        // seed the RNG, but let it be overridden from user input
+        unsigned seed = (unsigned) time(NULL);
+        
+        for (;;) {
+            table << "Number of players?  (2-9) ";
+            playerCount = readUnsigned();
+            if (playerCount < 2 || playerCount > 9)
+                seed = playerCount;
+            else
+                break;
+        }
+
+        table << "(using " << seed << " as RNG seed)" << "\n";
+        srand(seed);
+
+        game_t game(playerCount);
+        
+        vector<string> computerNames;
+        computerNames.push_back("*Alan T.");
+        computerNames.push_back("*Steve J.");
+        computerNames.push_back("*Grace H.");
+        computerNames.push_back("*Donald K.");
+        computerNames.push_back("*Dennis R.");
+        computerNames.push_back("*Bjarne S.");
+        computerNames.push_back("*Herb S.");
+        computerNames.push_back("*Bill G.");
+        computerNames.push_back("*James H.");
+        random_shuffle(computerNames.begin(), computerNames.end());
+      
+        // attach brains to each player
+        table << "If you enter an empty string for a name, that and all future players will be run by computer.  ";
+        table << "Players should be entered in seating order (aka auction bidding order).\n";
+        table.setLeftMargin(4);
+        
+        bool anyHumans = true;
+        for (int i=0; i<playerCount; i++) {
+            string name;
+            if (anyHumans) {
+                table << "Player " << i+1 << " name? ";
+                getline(cin,name);
+                if (name.size() == 0)
+                    anyHumans = false;
+            }
+            brain_t *thisBrain;
+            if (name.size() == 0) {
+                name = computerNames.back();
+                computerNames.pop_back();
+                thisBrain = new computerBrain_t(name,game);
+            }
+            else {
+                thisBrain = new playerBrain_t(name);
+                anyHumansInGame = true;
+            }
+                
+              game.setPlayerBrain(i,*thisBrain);
+        }
+
+        // set up the play area, deal hands, etc
+        game.setupGame();
+        // do the first turn of the game (several phases are skipped)
         game.displayPlayerOrder();
-        game.replaceUpgradeCards();
-        game.drawProductionCards();
-        game.discardExcessProductionCards();
-        game.performPlayerTurns(false);
-    } while (!game.checkVictoryConditions());
+        game.performPlayerTurns(true);
+        // game cannot possibly end but let's get vp's and turn order correct for second turn.
+        game.checkVictoryConditions();
+        amt_t round = 1;
+        
+        // now enter the normal turn progression
+        do {
+            ++round;
+            table << "\n\n";
+            table << "        =======================\n";
+            table << "        ===  R O U N D  " << ((round<10)?" ":"") << round << "  ===\n";
+            table << "        =======================\n\n";
+            game.displayPlayerOrder();
+            game.replaceUpgradeCards();
+            game.drawProductionCards();
+            game.discardExcessProductionCards();
+            game.performPlayerTurns(false);
+        } while (!game.checkVictoryConditions());
+        table << "Play again? (y/n) ";
+    } while (readLetter() == 'Y');
 }
