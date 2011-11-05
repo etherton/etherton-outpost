@@ -775,6 +775,7 @@ class game_t {
     typedef vector<playerPos_t>::iterator playerOrderIt_t;
     byte_t era, marketLimit;
     bool previousMarketEmpty;
+    friend class computerBrain_t;       // temporary, hopefully...
 public:
     game_t(playerIndex_t playerCount) {
         // default ctor sets up a bunch of game state
@@ -1257,14 +1258,79 @@ public:
         return i;
     }
     void plan(turnphase_t phase) {
+        /*
+            Upgrades:
+            Data Library: $15/VP, no income
+            Warehouse: $25/VP, no income (+5 hand size)
+            Heavy Equipment $30/VP
+            Nodule: $25/VP
+            Scientists: $20/VP, 13 income
+            Orbital Lab: $16/VP, 17 income
+            Robotics: $16/VP
+            Laboratory: $13/VP, 13 income (cost includes operator, VP includes free factory)
+            Ecoplants: $6/VP
+            Outpost: $16/VP, 10 income (cost includes operator, VP includes free factory)
+            Space Station: $13/VP, 30 income (cost includes operator)
+            Planetary Cruiser: $11/VP, 40 income (cost includes operator)
+            Moon Base: $10/VP, 50 income (cost includes operator)
+         
+            Factories: (all operators assumed to be $10)
+            Ore: $20/VP, 3 income
+            Water: $30/VP, 7 income
+            Titanium: $20/VP, 10 income
+            Research: $20/VP, 13 income
+            New Chemicals: $23/VP, 20 income
+        */
         // int vps = player->computeVictoryPoints();
+        
+        if (player->factories[WATER]<3)
+            factoryWeWant = WATER;
+        
+        // early in the game, 
+        //if (phase == AUCTION_MY_TURN);
         
         // If we're about to buy factories, assign personnel first to account for any free purchases.
         // (this is almost always already done, main exception is new robot when purchasing robotics)
         if (phase == BUYING_FACTORIES)
             assignPersonnel();
         
-        priceWillPay.fill(0);
+        // any upgrade is worth face value
+        for (int i=0; i<PRODUCTION_COUNT; i++)
+            priceWillPay[i] = factoryCosts[i];
+        
+        // favor things we have discounts for (but not necessarily at full discount value)
+        priceWillPay[WAREHOUSE] += 3 * player->upgrades[HEAVY_EQUIPMENT];
+        priceWillPay[NODULE] += 3 * player->upgrades[HEAVY_EQUIPMENT];
+        priceWillPay[SCIENTISTS] += 7 * player->upgrades[DATA_LIBRARY];
+        priceWillPay[LABORATORY] += 7 * player->upgrades[DATA_LIBRARY];
+        if (player->colonistLimit == 5) {
+            priceWillPay[NODULE] += game.upgradeDrawPiles[NODULE]? 3 : 8;
+            priceWillPay[ROBOTICS] += game.upgradeDrawPiles[ROBOTICS]? 10 : 20;
+            priceWillPay[OUTPOST] += game.upgradeDrawPiles[OUTPOST]? 5 : 12;
+        }
+        else if (player->colonistLimit == 8) {
+            priceWillPay[NODULE] += game.upgradeDrawPiles[NODULE]? 2 : 6;
+            priceWillPay[ROBOTICS] += game.upgradeDrawPiles[ROBOTICS]? 7 : 13;
+            priceWillPay[OUTPOST] += game.upgradeDrawPiles[OUTPOST]? 3 : 10;
+        }
+        if (player->upgrades[NODULE] + player->upgrades[OUTPOST] < 2)
+            priceWillPay[ROBOTICS] += 10;
+        // If we're at our colonist limit and we don't have robotics, favor factories that
+        // do not require population
+        if (player->colonists >= player->colonistLimit && !player->upgrades[ROBOTICS]) {
+            priceWillPay[SCIENTISTS] += 15;
+            priceWillPay[ORBITAL_LAB] += 20;
+        }
+        // If we have room to buy more colonists, or we expect we'll be buying more,
+        // be willing to pay more for ecoplants (which actually is pretty cheap for the VP's)
+        if (player->colonists < player->colonistLimit + player->extraColonistLimit || player->colonistLimit == 5)
+            priceWillPay[ECOPLANTS] += 15;
+        
+        // We'll pay up to $20/VP for any era 3 tech.  The exact limits will
+        // depend on our relative standing to the current high bidder.
+        priceWillPay[SPACE_STATION] = 200;
+        priceWillPay[PLANETARY_CRUISER] = 300;
+        priceWillPay[MOON_BASE] = 400;
         
         // Amount of money we do NOT want to use for bids.
         reserveForExpansion = 0;
@@ -1285,7 +1351,7 @@ public:
             factoryWeWant = TITANIUM;
         else
             factoryWeWant = WATER;
-      
+        
         // evaluate each available upgrade based on criteria:
         // 1. how much would it benefit us
         // 2. how much would it benefit the high bidder (perhaps if they're ahead of us)
