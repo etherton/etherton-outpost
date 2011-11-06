@@ -1498,7 +1498,8 @@ public:
         // didn't find anything we want?  (or could afford...)
         if (!bestWillPay)
             return upgradeMarket.size();
-        bid = findBestCards(upgradeCosts[upgradeMarket[bestIndex]],hand,0,0);
+        amt_t bestDiscount = player->computeDiscount(upgradeMarket[bestIndex]);
+        bid = findBestCards(upgradeCosts[upgradeMarket[bestIndex]] - bestDiscount,hand,0,0) + bestDiscount;
         return bestIndex;
     }
     money_t raiseOrPass(player_t &highBidder,vector<card_t> &hand,upgradeEnum_t upgrade,money_t minBid) {
@@ -1863,7 +1864,9 @@ int main(int argc,char **argv) {
         for (;;) {
             table << "Number of players?  (2-9) ";
             playerCount = readUnsigned();
-            if (playerCount < 2 || playerCount > 9)
+            if (playerCount >= 10 && playerCount < 20)
+                debugLevel = playerCount - 10;
+            else if (playerCount < 2 || playerCount > 9)
                 seed = playerCount;
             else
                 break;
