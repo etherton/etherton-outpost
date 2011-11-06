@@ -786,19 +786,7 @@ struct player_t {
         averageIncome = 3 * numOre + 7 * numWater + 10 * numTitanium + 13 * numResearch + 17 * numMicrobiotics +
             20 * numNewChemicals + 30 * numOrbitalMedicine + 40 * numRingOre + 50 * numMoonOre;
         assert(averageIncome);
-    }
-    
-    void dump() {
-        cout << "player " << brain->getName() << ", " << int(colonists) << "/" << int(colonistLimit) << " colonists, " << int(productionSize) << "/" << int(productionLimit) << " cards\n\tfactories: ";
-        for (int i=ORE; i<PRODUCTION_COUNT; i++)
-            if (factories[i])
-                cout << factoryNames[i] << ":" << int(factories[i]) << "(" << int(mannedByColonists[i]) << 
-                    "/" << int(mannedByRobots[i]) << ") ";
-        cout << "\n\tcards: ";
-        for (cardIt_t i=hand.begin(); i!=hand.end(); i++)
-            cout << factoryNames[i->prodType] << "/" << int(i->value) << "$ ";
-        cout << "(" << totalCredits << "$ total)\n";
-    }
+    }    
 };
 
 class game_t {
@@ -913,7 +901,6 @@ public:
     void setPlayerBrain(playerIndex_t index,brain_t &brain) {
         players[index].setBrain(brain);
         brain.setPlayer(players[index]);
-        // players[index].dump();
     }
   
    
@@ -1148,7 +1135,7 @@ money_t brain_t::payFor(money_t cost,vector<card_t> &hand,bank_t &bank,amt_t min
     size_t best;
 
     if (debugLevel > 0) {
-        cout << name << " needs to pay at least " << cost << " (of " << player->getTotalCredits() << ") from:\n\t";
+        debug << name << " needs to pay at least " << cost << " (of " << player->getTotalCredits() << ") from:\n";
         displayProductionCardsOnSingleLine(hand);
     }
     
@@ -1384,7 +1371,7 @@ public:
         priceWillPay[SPACE_STATION] = 200;
         priceWillPay[PLANETARY_CRUISER] = 300;
         priceWillPay[MOON_BASE] = 400;
-        
+
         // if new chemicals is possible, save up for that.
         bool hasResearch = false;
         for (cardIt_t c=player->hand.begin(); c!=player->hand.end(); c++)
@@ -1423,9 +1410,8 @@ public:
         
         // Don't buy more factories of this type if we already can't man them all
         // (test with > not >= so that we will actually buy a first factory!)
-        if (factoryWeWant != PRODUCTION_COUNT && player->factories[factoryWeWant] > player->mannedByColonists[factoryWeWant] + player->mannedByRobots[factoryWeWant]) {
+        if (factoryWeWant != PRODUCTION_COUNT && player->factories[factoryWeWant] > player->mannedByColonists[factoryWeWant] + player->mannedByRobots[factoryWeWant])
             factoryWeWant = PRODUCTION_COUNT;
-        }
         
         // If we want a factory and we're far enough behind on incomine and we haven't yet had our turn, 
         // make sure none of our bids will prevent us from also purchasing a factory.
@@ -1442,11 +1428,8 @@ public:
         }
         
         amt_t maxBid = player->getTotalCredits();
-        
-        if (factoryWeWant != PRODUCTION_COUNT && phase < AUCTION_AFTER_MY_TURN && reallyNeedFactory) {
-            amt_t costForFactory = findBestCards(factoryCosts[factoryWeWant],player->hand,factoryWeWant==NEW_CHEMICALS?1:0,NULL);
-            maxBid = player->getTotalCredits() - costForFactory;
-        }
+        if (factoryWeWant != PRODUCTION_COUNT && phase < AUCTION_AFTER_MY_TURN && reallyNeedFactory)
+            maxBid -= findBestCards(factoryCosts[factoryWeWant],player->hand,factoryWeWant==NEW_CHEMICALS?1:0,NULL);
         
         // If we're not buying a factory, figure out if we're probably discarding cards next turn
         if (factoryWeWant == PRODUCTION_COUNT) {
@@ -1471,8 +1454,13 @@ public:
         
         // To keep later code simpler, zero out prices on things we cannot afford.
         for (int i=DATA_LIBRARY; i<=MOON_BASE; i++) {
-            if (priceWillPay[i] > maxBid)
-                priceWillPay[i] = maxBid;
+            // If we're trying to get a factory, limit our maximum bid *unless* it's for an upgrade that already includes a factory.
+            // Note that any upgrade that includes a factory is good enough, because it's also worth more victory points.
+            amt_t whichBid = (i==SCIENTISTS||i==ORBITAL_LAB||i==LABORATORY||i>=OUTPOST)? player->getTotalCredits() : maxBid;
+            if (priceWillPay[i] > whichBid)
+                priceWillPay[i] = whichBid;
+            // Raise the price we'll pay by the discount we'll get
+            priceWillPay[i] += player->computeDiscount((upgradeEnum_t)i);
             if (priceWillPay[i] < upgradeCosts[i])
                 priceWillPay[i] = 0;
         }
