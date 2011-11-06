@@ -1435,18 +1435,20 @@ public:
         if (factoryWeWant == PRODUCTION_COUNT) {
             int expectedDiscards = player->getExpectedProductionSize() + player->productionSize - player->productionLimit;
             if (expectedDiscards > 0) {
-                // find the worst factory that is still manned
-                int worstFactory = ORE;
-                while (worstFactory != NEW_CHEMICALS) {
-                    if (player->mannedByColonists[worstFactory] || player->mannedByRobots[worstFactory])
-                          break;
-                    else
-                        ++worstFactory;
-                }
-                static byte_t averageIncome[] = { 3, 7, 10, 13, 17, 20 };
-                money_t expectedWaste = expectedDiscards * averageIncome[worstFactory];
                 if (debugLevel > 0)
-                    debug << name << " expects to have to discard " << expectedDiscards << " next turn, wasting about " << expectedWaste << ".\n";
+                    debug << name << " expects to have to discard " << expectedDiscards << " next turn, ";
+                money_t expectedWaste = 0;
+                static const byte_t averageIncome[] = { 3, 7, 10, 13, 17, 20 };
+                for (int i=ORE; expectedDiscards && i<=NEW_CHEMICALS; i++) {
+                    int operators = player->mannedByColonists[i] + player->mannedByRobots[i];
+                    while (expectedDiscards && operators) {
+                        expectedWaste += averageIncome[i];
+                        --expectedDiscards;
+                        --operators;
+                    }
+                }
+                if (debugLevel > 0)
+                    debug << "wasting about " << expectedWaste << ".\n";
                 for (int i=DATA_LIBRARY; i<=MOON_BASE; i++)
                     priceWillPay[i] += expectedWaste;
             }
