@@ -1421,6 +1421,12 @@ public:
             }
         }
         
+        // Don't buy more factories of this type if we already can't man them all
+        // (test with > not >= so that we will actually buy a first factory!)
+        if (factoryWeWant != PRODUCTION_COUNT && player->factories[factoryWeWant] > player->mannedByColonists[factoryWeWant] + player->mannedByRobots[factoryWeWant]) {
+            factoryWeWant = PRODUCTION_COUNT;
+        }
+        
         // If we want a factory and we're far enough behind on incomine and we haven't yet had our turn, 
         // make sure none of our bids will prevent us from also purchasing a factory.
         // (at beginning of game, we really want to get to three water factories)
@@ -1857,6 +1863,8 @@ int main(int argc,char **argv) {
         table << "\n";
         table.setLeftMargin(0);
     }
+    
+    table << "Built on " << __DATE__ << " at " << __TIME__ << ".\n";
     
     do {
         unsigned playerCount;
