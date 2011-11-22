@@ -827,8 +827,8 @@ public:
     const bank_t& getBank() const { return bank; }
         
     void setupProductionDecks() {
-        static const cardDistribution_t OreDeck[] = { {1,4}, {2,6}, {3,6}, {4,6}, {5,4} };
-        static const cardDistribution_t WaterDeck[] = { {4,2}, {5,5}, {6,7}, {7,9}, {8,7}, {9,5}, {10,3} };
+        static const cardDistribution_t OreDeck[] = { {1,6}, {2,8}, {3,8}, {4,8}, {5,6} };
+        static const cardDistribution_t WaterDeck[] = { {4,3}, {5,5}, {6,7}, {7,9}, {8,7}, {9,5}, {10,3} };
         static const cardDistribution_t TitaniumDeck[] = { {7,5}, {8,7}, {9,9}, {10,11}, {11,9}, {12,7}, {13,5} };
         static const cardDistribution_t ResearchDeck[] = { {9,2}, {10,3}, {11,4}, {12,5}, {13,6}, {14,5}, {15,4}, {16,3}, {17,2} };
         static const cardDistribution_t MicrobioticsDeck[] = { {14,1}, {15,2}, {16,3}, {17,4}, {18,3}, {19,2}, {20,1} };
